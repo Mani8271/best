@@ -1,4 +1,15 @@
-require("dotenv").config({ path: require('path').join(__dirname, '.env') });
+const path = require('path');
+const fs = require('fs');
+const envPath = path.join(__dirname, '.env');
+console.log("Current Directory:", __dirname);
+console.log(".env exists:", fs.existsSync(envPath));
+if (fs.existsSync(envPath)) {
+  console.log(".env size:", fs.statSync(envPath).size);
+}
+const result = require("dotenv").config({ path: envPath });
+if (result.error) console.error("Dotenv Load Error:", result.error);
+console.log("Injected keys:", Object.keys(result.parsed || {}));
+
 const express = require('express')
 const cors = require('cors')
 console.log("RAZORPAY_KEY_ID:", process.env.RAZORPAY_KEY_ID);
