@@ -1,7 +1,7 @@
+require("dotenv").config({ path: require('path').join(__dirname, '.env') });
 const express = require('express')
 const cors = require('cors')
-// const dotenv = require('dotenv')
-require("dotenv").config();
+console.log("RAZORPAY_KEY_ID:", process.env.RAZORPAY_KEY_ID);
 const { sequelize } = require('./config/db.js')
 const authRoutes = require('./routes/auth.js')
 const productRoutes = require("./routes/products.js");

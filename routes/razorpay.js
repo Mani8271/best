@@ -1,3 +1,4 @@
+require("dotenv").config();
 const express = require("express");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
@@ -8,9 +9,13 @@ const Payment = require("../models/Payment.js");
 
 const router = express.Router();
 
+if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+  console.warn("⚠️ RAZORPAY_KEY_ID or RAZORPAY_KEY_SECRET is missing. Payments will not work.");
+}
+
 const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
+  key_id: process.env.RAZORPAY_KEY_ID || "not-set",
+  key_secret: process.env.RAZORPAY_KEY_SECRET || "not-set",
 });
 
 /**
