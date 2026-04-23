@@ -1,0 +1,5 @@
+node_modules/
+.env
+uploads/
+persistent_uploads/
+package-lock.json
