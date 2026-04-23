@@ -1,9 +1,9 @@
-// import express from "express";
-// import Category from "../models/Category.js";
-// import SubCategory from "../models/SubCategory.js";
-// import auth from "../middleware/auth.js";
-// import isAdmin from "../middleware/isAdmin.js";
-// import { uploadCategoryImage } from "../config/upload.js";
+// const express = require("express");
+// const Category = require("../models/Category.js");
+// const SubCategory = require("../models/SubCategory.js");
+// const auth = require("../middleware/auth.js");
+// const isAdmin = require("../middleware/isAdmin.js");
+// const { uploadCategoryImage  } = require("../config/upload.js");
 
 // const router = express.Router();
 
@@ -97,16 +97,16 @@
 //   }
 // });
 
-// export default router;
+// module.exports = router;
 // ========================= routes/categories.js (FULL CODE) =========================
-import express from "express";
-import Category from "../models/Category.js";
-import SubCategory from "../models/SubCategory.js";
-import auth from "../middleware/auth.js";
-import isAdmin from "../middleware/isAdmin.js";
-import { uploadCategoryImage, getPublicPath } from "../config/upload.js";
-import { sequelize } from "../config/db.js";
-import optionalAuth from "../middleware/optionalAuth.js";
+const express = require("express");
+const Category = require("../models/Category.js");
+const SubCategory = require("../models/SubCategory.js");
+const auth = require("../middleware/auth.js");
+const isAdmin = require("../middleware/isAdmin.js");
+const { uploadCategoryImage, getPublicPath  } = require("../config/upload.js");
+const { sequelize  } = require("../config/db.js");
+const optionalAuth = require("../middleware/optionalAuth.js");
 
 const router = express.Router();
 
@@ -248,4 +248,4 @@ router.delete("/:id", auth, isAdmin, async (req, res) => {
   }
 });
 
-export default router;
+module.exports = router;

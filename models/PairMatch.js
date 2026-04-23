@@ -1,5 +1,5 @@
-import { DataTypes } from "sequelize";
-import { sequelize } from "../config/db.js";
+const { DataTypes } = require("sequelize");
+const { sequelize } = require("../config/db.js");
 
 const PairMatch = sequelize.define(
   "PairMatch",
@@ -24,4 +24,4 @@ const PairMatch = sequelize.define(
   }
 );
 
-export default PairMatch;
+module.exports = PairMatch;

@@ -1,10 +1,10 @@
 // routes/banners.js
-import express from "express";
-import { Op } from "sequelize";
-import Banner from "../models/Banner.js";
-import auth from "../middleware/auth.js";
-import isAdmin from "../middleware/isAdmin.js";
-import { uploadBannerImage, getPublicPath } from "../config/upload.js";
+const express = require("express");
+const { Op  } = require("sequelize");
+const Banner = require("../models/Banner.js");
+const auth = require("../middleware/auth.js");
+const isAdmin = require("../middleware/isAdmin.js");
+const { uploadBannerImage, getPublicPath  } = require("../config/upload.js");
 
 const router = express.Router();
 
@@ -160,4 +160,4 @@ router.delete("/:id", auth, isAdmin, async (req, res) => {
   }
 });
 
-export default router;
+module.exports = router;

@@ -1,11 +1,11 @@
-import express from "express";
-import crypto from "crypto";
-import auth from "../middleware/auth.js";
-import ReferralLink from "../models/ReferralLink.js";
+const express = require("express");
+const crypto = require("crypto");
+const auth = require("../middleware/auth.js");
+const ReferralLink = require("../models/ReferralLink.js");
 
 const router = express.Router();
 
-export const createDefaultReferralLinks = async (userId, t = null) => {
+const createDefaultReferralLinks = async (userId, t = null) => {
   const positions = ["LEFT", "RIGHT"];
   for (const position of positions) {
     const code = crypto.randomBytes(24).toString("hex");
@@ -71,4 +71,5 @@ router.post("/create", auth, async (req, res) => {
   }
 });
 
-export default router;
+module.exports = router;
+router.createDefaultReferralLinks = createDefaultReferralLinks;

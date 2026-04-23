@@ -1,6 +1,6 @@
-import { DataTypes } from "sequelize";
-import { sequelize } from "../config/db.js";
-import bcrypt from "bcryptjs";
+const { DataTypes } = require("sequelize");
+const { sequelize } = require("../config/db.js");
+const bcrypt = require("bcryptjs");
 
 const User = sequelize.define("User", {
   name: { type: DataTypes.STRING, allowNull: false },
@@ -101,4 +101,4 @@ User.beforeValidate(async (user, options) => {
 
 
 
-export default User;
+module.exports = User;

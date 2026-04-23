@@ -1,5 +1,5 @@
-import { DataTypes } from "sequelize";
-import { sequelize } from "../config/db.js";
+const { DataTypes } = require("sequelize");
+const { sequelize } = require("../config/db.js");
 
 const DeliveryCharge = sequelize.define(
   "DeliveryCharge",
@@ -29,4 +29,4 @@ const DeliveryCharge = sequelize.define(
   { timestamps: true }
 );
 
-export default DeliveryCharge;
+module.exports = DeliveryCharge;

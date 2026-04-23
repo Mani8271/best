@@ -1,8 +1,7 @@
-import "dotenv/config"; // ✅ IMPORTANT (loads .env before using process.env)
-
-import multer from "multer";
-import fs from "fs";
-import path from "path";
+require("dotenv").config();
+const multer = require("multer");
+const fs = require("fs");
+const path = require("path");
 
 const ROOT =
   (process.env.UPLOAD_ROOT && process.env.UPLOAD_ROOT.trim()) ||
@@ -10,7 +9,7 @@ const ROOT =
 
 const ensureDir = (dir) => fs.mkdirSync(dir, { recursive: true });
 
-export const UPLOAD_ROOT = ROOT;
+const UPLOAD_ROOT = ROOT;
 
 const getPublicPath = (file) => {
   if (!file || !file.path) return null;
@@ -19,8 +18,6 @@ const getPublicPath = (file) => {
   const relative = path.relative(ROOT, file.path).split(path.sep).join("/");
   return `/uploads/${relative}`;
 };
-
-export { getPublicPath };
 
 
 const productDir = path.join(ROOT, "products");
@@ -50,31 +47,31 @@ const makeStorage = (dir) =>
     filename,
   });
 
-export const uploadProductImages = multer({
+const uploadProductImages = multer({
   storage: makeStorage(productDir),
   fileFilter,
   limits: { fileSize: 2 * 1024 * 1024 },
 }).array("images", 4);
 
-export const uploadProfilePic = multer({
+const uploadProfilePic = multer({
   storage: makeStorage(profileDir),
   fileFilter,
   limits: { fileSize: 5 * 1024 * 1024 },
 }).single("profilePic");
 
-export const uploadCategoryImage = multer({
+const uploadCategoryImage = multer({
   storage: makeStorage(categoryDir),
   fileFilter,
   limits: { fileSize: 2 * 1024 * 1024 },
 }).single("image");
 
-export const uploadSubCategoryImage = multer({
+const uploadSubCategoryImage = multer({
   storage: makeStorage(subCategoryDir),
   fileFilter,
   limits: { fileSize: 2 * 1024 * 1024 },
 }).single("image");
 
-export const uploadBannerImage = multer({
+const uploadBannerImage = multer({
   storage: makeStorage(bannerDir),
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith("image/")) return cb(null, true);
@@ -83,7 +80,7 @@ export const uploadBannerImage = multer({
   limits: { fileSize: 3 * 1024 * 1024 },
 }).single("image");
 
-export const uploadUserDocs = multer({
+const uploadUserDocs = multer({
   storage: makeStorage(kycDir),
   fileFilter,
   limits: { fileSize: 5 * 1024 * 1024 },
@@ -93,3 +90,14 @@ export const uploadUserDocs = multer({
   { name: "panPhoto", maxCount: 1 },
   { name: "aadharPhoto", maxCount: 1 },
 ]);
+
+module.exports = {
+  UPLOAD_ROOT,
+  getPublicPath,
+  uploadProductImages,
+  uploadProfilePic,
+  uploadCategoryImage,
+  uploadSubCategoryImage,
+  uploadBannerImage,
+  uploadUserDocs,
+};

@@ -1,8 +1,8 @@
-import express from "express";
-import { Op } from "sequelize";
-import Contact from "../models/Contact.js";
-import auth from "../middleware/auth.js";
-import isAdmin from "../middleware/isAdmin.js";
+const express = require("express");
+const { Op  } = require("sequelize");
+const Contact = require("../models/Contact.js");
+const auth = require("../middleware/auth.js");
+const isAdmin = require("../middleware/isAdmin.js");
 
 const router = express.Router();
 
@@ -116,4 +116,4 @@ router.patch("/admin/read-all", auth, isAdmin, async (req, res) => {
     }
 });
 
-export default router;
+module.exports = router;

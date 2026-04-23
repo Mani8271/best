@@ -1,7 +1,7 @@
-import { DataTypes } from "sequelize";
-import { sequelize } from '../config/db.js'
-import Order from "./Order.js";
-import User from "./User.js";
+const { DataTypes } = require("sequelize");
+const { sequelize } = require("../config/db.js");
+const Order = require("./Order.js");
+const User = require("./User.js");
 
 const Payment = sequelize.define(
   "Payment",
@@ -41,4 +41,4 @@ const Payment = sequelize.define(
 
 
 
-export default Payment;
+module.exports = Payment;

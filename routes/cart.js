@@ -1,8 +1,8 @@
-import express from "express";
-import Cart from "../models/Cart.js";
-import CartItem from "../models/CartItem.js";
-import Product from "../models/Product.js";
-import auth from "../middleware/auth.js";
+const express = require("express");
+const Cart = require("../models/Cart.js");
+const CartItem = require("../models/CartItem.js");
+const Product = require("../models/Product.js");
+const auth = require("../middleware/auth.js");
 
 const router = express.Router();
 
@@ -131,4 +131,4 @@ router.delete("/:id", auth, async (req, res) => {
   }
 });
 
-export default router;
+module.exports = router;

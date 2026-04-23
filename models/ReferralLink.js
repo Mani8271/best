@@ -1,5 +1,5 @@
-import { DataTypes } from "sequelize";
-import { sequelize } from "../config/db.js";
+const { DataTypes } = require("sequelize");
+const { sequelize } = require("../config/db.js");
 
 const ReferralLink = sequelize.define(
   "ReferralLink",
@@ -12,4 +12,4 @@ const ReferralLink = sequelize.define(
   { timestamps: true }
 );
 
-export default ReferralLink;
+module.exports = ReferralLink;

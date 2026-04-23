@@ -1,19 +1,19 @@
 
 // ========================= routes/users.js (FULL FILE) =========================
-import express from "express";
-import { Op } from "sequelize";
-import bcrypt from "bcryptjs";
+const express = require("express");
+const { Op  } = require("sequelize");
+const bcrypt = require("bcryptjs");
 
-import User from "../models/User.js";
-import auth from "../middleware/auth.js";
-import isAdmin from "../middleware/isAdmin.js";
-import { uploadUserDocs, getPublicPath } from "../config/upload.js";
-import { sequelize } from "../config/db.js";
-import Wallet from "../models/Wallet.js";
-import WalletTransaction from "../models/WalletTransaction.js";
-import BinaryNode from "../models/BinaryNode.js";
-import Referral from "../models/Referral.js";
-import ReferralLink from "../models/ReferralLink.js";
+const User = require("../models/User.js");
+const auth = require("../middleware/auth.js");
+const isAdmin = require("../middleware/isAdmin.js");
+const { uploadUserDocs, getPublicPath  } = require("../config/upload.js");
+const { sequelize  } = require("../config/db.js");
+const Wallet = require("../models/Wallet.js");
+const WalletTransaction = require("../models/WalletTransaction.js");
+const BinaryNode = require("../models/BinaryNode.js");
+const Referral = require("../models/Referral.js");
+const ReferralLink = require("../models/ReferralLink.js");
 
 const router = express.Router();
 /**
@@ -401,4 +401,4 @@ router.delete("/:id", auth, isAdmin, async (req, res) => {
 
 
 
-export default router;
+module.exports = router;

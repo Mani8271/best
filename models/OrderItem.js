@@ -1,5 +1,5 @@
-import { DataTypes } from "sequelize";
-import { sequelize } from "../config/db.js";
+const { DataTypes } = require("sequelize");
+const { sequelize } = require("../config/db.js");
 
 const OrderItem = sequelize.define(
   "OrderItem",
@@ -14,4 +14,4 @@ const OrderItem = sequelize.define(
   { timestamps: true }
 );
 
-export default OrderItem;
+module.exports = OrderItem;

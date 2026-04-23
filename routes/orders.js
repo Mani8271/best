@@ -1,29 +1,29 @@
 
 // ========================= routes/orders.js (FULL CODE WITH FIXES) =========================
-import express from "express";
-import auth from "../middleware/auth.js";
-import isAdmin from "../middleware/isAdmin.js";
-import { Op } from "sequelize";
+const express = require("express");
+const auth = require("../middleware/auth.js");
+const isAdmin = require("../middleware/isAdmin.js");
+const { Op  } = require("sequelize");
 
-import { sequelize } from "../config/db.js";
+const { sequelize  } = require("../config/db.js");
 
-import Cart from "../models/Cart.js";
-import CartItem from "../models/CartItem.js";
-import Product from "../models/Product.js";
+const Cart = require("../models/Cart.js");
+const CartItem = require("../models/CartItem.js");
+const Product = require("../models/Product.js");
 
-import Order from "../models/Order.js";
-import OrderItem from "../models/OrderItem.js";
+const Order = require("../models/Order.js");
+const OrderItem = require("../models/OrderItem.js");
 
-import Wallet from "../models/Wallet.js";
-import WalletTransaction from "../models/WalletTransaction.js";
+const Wallet = require("../models/Wallet.js");
+const WalletTransaction = require("../models/WalletTransaction.js");
 
-import DeliveryCharge from "../models/DeliveryCharge.js";
-import Address from "../models/Address.js";
-import User from "../models/User.js";
+const DeliveryCharge = require("../models/DeliveryCharge.js");
+const Address = require("../models/Address.js");
+const User = require("../models/User.js");
 
-import Referral from "../models/Referral.js";
-import { updateUplineEntrepreneurCounts } from "./auth.js";
-import { getSettingNumber } from "../utils/appSettings.js";
+const Referral = require("../models/Referral.js");
+const { updateUplineEntrepreneurCounts  } = require("./auth.js");
+const { getSettingNumber  } = require("../utils/appSettings.js");
 
 const router = express.Router();
 
@@ -878,4 +878,4 @@ router.post("/admin/offline", auth, async (req, res) => {
     return res.status(400).json({ msg: e.message });
   }
 });
-export default router;
+module.exports = router;

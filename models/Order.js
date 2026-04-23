@@ -1,5 +1,5 @@
-import { DataTypes } from "sequelize";
-import { sequelize } from "../config/db.js";
+const { DataTypes } = require("sequelize");
+const { sequelize } = require("../config/db.js");
 
 const Order = sequelize.define(
   "Order",
@@ -48,4 +48,4 @@ const Order = sequelize.define(
   { timestamps: true }
 );
 
-export default Order;
+module.exports = Order;

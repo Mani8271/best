@@ -1,7 +1,7 @@
-import express from "express";
-import DeliveryCharge from "../models/DeliveryCharge.js";
-import auth from "../middleware/auth.js";
-import isAdmin from "../middleware/isAdmin.js";
+const express = require("express");
+const DeliveryCharge = require("../models/DeliveryCharge.js");
+const auth = require("../middleware/auth.js");
+const isAdmin = require("../middleware/isAdmin.js");
 
 const router = express.Router();
 
@@ -85,4 +85,4 @@ router.delete("/:id", auth,  async (req, res) => {
   }
 });
 
-export default router;
+module.exports = router;

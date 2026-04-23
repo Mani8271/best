@@ -1,4 +1,4 @@
-import AppSetting from "../models/AppSetting.js";
+const AppSetting = require("../models/AppSetting.js");
 
 const DEFAULTS = {
   MIN_SPEND_UNLOCK: 30000,
@@ -6,7 +6,7 @@ const DEFAULTS = {
   PAIR_BONUS: 3000, // later use
 };
 
-export async function getSettingNumber(key, t) {
+async function getSettingNumber(key, t) {
   const row = await AppSetting.findOne({
     where: { key },
     transaction: t,
@@ -21,3 +21,5 @@ export async function getSettingNumber(key, t) {
   }
   return num;
 }
+
+module.exports = { getSettingNumber };

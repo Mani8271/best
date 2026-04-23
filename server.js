@@ -1,63 +1,59 @@
-import express from 'express'
-import cors from 'cors'
-// import dotenv from 'dotenv'
-import "dotenv/config";
-import { sequelize } from './config/db.js'
-import authRoutes from './routes/auth.js'
-import productRoutes from "./routes/products.js";
-import orderRoutes from "./routes/orders.js";
-import pkg from "./config/upload.js";
+const express = require('express')
+const cors = require('cors')
+// const dotenv = require('dotenv')
+require("dotenv").config();
+const { sequelize } = require('./config/db.js')
+const authRoutes = require('./routes/auth.js')
+const productRoutes = require("./routes/products.js");
+const orderRoutes = require("./routes/orders.js");
+const pkg = require("./config/upload.js");
 const { UPLOAD_ROOT } = pkg;
-import Cart from "./models/Cart.js";
-import CartItem from "./models/CartItem.js";
-import User from "./models/User.js";
-import Product from "./models/Product.js";
-import cartRoutes from "./routes/cart.js";
-import Order from "./models/Order.js";
-import OrderItem from "./models/OrderItem.js";
-import Wallet from "./models/Wallet.js";
-import WalletTransaction from "./models/WalletTransaction.js";
-import walletRoutes from "./routes/wallet.js";
-import deliveryCharge from "./routes/deliveryCharge.js";
-import user from "./routes/user.js";
-import bannerRoutes from "./routes/banners.js";
-import Address from "./models/Address.js";
-import addressRoutes from "./routes/address.js";
-import razorpayRoutes from "./routes/razorpay.js";
-import paymentsRoutes from "./routes/payments.js";
-import Payment from "./models/Payment.js";
-import BinaryNode from "./models/BinaryNode.js";
-import Referral from "./models/Referral.js";
-import referralRoutes from "./routes/referrals.js";
-import binaryRoutes from "./routes/binary.js";
-import ReferralLink from "./models/ReferralLink.js";
-import ReferralEdge from "./models/ReferralEdge.js";
-import referralTreeRoutes from "./routes/referralTree.js";
-import settingsRoutes from "./routes/settings.js";
-import AppSetting from "./models/AppSetting.js";
-import PairPending from "./models/PairPending.js";
-import PairMatch from "./models/PairMatch.js";
-import reportsRoutes from "./routes/reports.js";
-import pairsRoutes from "./routes/pairs.js";
-import withdrawalRoutes from "./routes/withdrawals.js";
-import awardsRoutes from "./routes/awards.js";
-import Category from "./models/Category.js";
-import SubCategory from "./models/SubCategory.js";
-import RankAchievement from "./models/RankAchievement.js";
-import RankSetting from "./models/RankSetting.js";
-import categoryRoutes from "./routes/categories.js";
-import subCategoryRoutes from "./routes/subcategories.js";
-import Contact from "./models/Contact.js";
-import contactsRoutes from "./routes/contacts.js";
+const Cart = require("./models/Cart.js");
+const CartItem = require("./models/CartItem.js");
+const User = require("./models/User.js");
+const Product = require("./models/Product.js");
+const cartRoutes = require("./routes/cart.js");
+const Order = require("./models/Order.js");
+const OrderItem = require("./models/OrderItem.js");
+const Wallet = require("./models/Wallet.js");
+const WalletTransaction = require("./models/WalletTransaction.js");
+const walletRoutes = require("./routes/wallet.js");
+const deliveryCharge = require("./routes/deliveryCharge.js");
+const user = require("./routes/user.js");
+const bannerRoutes = require("./routes/banners.js");
+const Address = require("./models/Address.js");
+const addressRoutes = require("./routes/address.js");
+const razorpayRoutes = require("./routes/razorpay.js");
+const paymentsRoutes = require("./routes/payments.js");
+const Payment = require("./models/Payment.js");
+const BinaryNode = require("./models/BinaryNode.js");
+const Referral = require("./models/Referral.js");
+const referralRoutes = require("./routes/referrals.js");
+const binaryRoutes = require("./routes/binary.js");
+const ReferralLink = require("./models/ReferralLink.js");
+const ReferralEdge = require("./models/ReferralEdge.js");
+const referralTreeRoutes = require("./routes/referralTree.js");
+const settingsRoutes = require("./routes/settings.js");
+const AppSetting = require("./models/AppSetting.js");
+const PairPending = require("./models/PairPending.js");
+const PairMatch = require("./models/PairMatch.js");
+const reportsRoutes = require("./routes/reports.js");
+const pairsRoutes = require("./routes/pairs.js");
+const withdrawalRoutes = require("./routes/withdrawals.js");
+const awardsRoutes = require("./routes/awards.js");
+const Category = require("./models/Category.js");
+const SubCategory = require("./models/SubCategory.js");
+const RankAchievement = require("./models/RankAchievement.js");
+const RankSetting = require("./models/RankSetting.js");
+const categoryRoutes = require("./routes/categories.js");
+const subCategoryRoutes = require("./routes/subcategories.js");
+const Contact = require("./models/Contact.js");
+const contactsRoutes = require("./routes/contacts.js");
 
 
 
 
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const path = require("path");
 
 
 const app = express()

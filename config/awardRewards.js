@@ -1,9 +1,9 @@
-import { Op } from "sequelize";
-import PairMatch from "../models/PairMatch.js";
-import RankSetting from "../models/RankSetting.js";
-import RankAchievement from "../models/RankAchievement.js";
-import Wallet from "../models/Wallet.js";
-import WalletTransaction from "../models/WalletTransaction.js";
+const { Op } = require("sequelize");
+const PairMatch = require("../models/PairMatch.js");
+const RankSetting = require("../models/RankSetting.js");
+const RankAchievement = require("../models/RankAchievement.js");
+const Wallet = require("../models/Wallet.js");
+const WalletTransaction = require("../models/WalletTransaction.js");
 
 async function creditAward({ userId, amount, meta, t }) {
   if (Number(amount || 0) <= 0) return null;
@@ -33,7 +33,7 @@ async function creditAward({ userId, amount, meta, t }) {
   return txn;
 }
 
-export async function checkAndGrantAwards({ userId, t }) {
+async function checkAndGrantAwards({ userId, t }) {
   // total matched pairs (ceiling applied ones)
   const totalPairs = await PairMatch.count({
     where: { uplineUserId: userId },
@@ -90,3 +90,5 @@ export async function checkAndGrantAwards({ userId, t }) {
 
   return { totalPairs, granted };
 }
+
+module.exports = { checkAndGrantAwards };

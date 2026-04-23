@@ -1,9 +1,9 @@
-import express from "express";
-import { Op } from "sequelize";
-import Address from "../models/Address.js";
-import User from "../models/User.js";
-import auth from "../middleware/auth.js";
-import isAdmin from "../middleware/isAdmin.js";
+const express = require("express");
+const { Op  } = require("sequelize");
+const Address = require("../models/Address.js");
+const User = require("../models/User.js");
+const auth = require("../middleware/auth.js");
+const isAdmin = require("../middleware/isAdmin.js");
 
 const router = express.Router();
 
@@ -405,4 +405,4 @@ router.get("/admin/user/:userId", auth, isAdmin, async (req, res) => {
 });
 
 
-export default router;
+module.exports = router;

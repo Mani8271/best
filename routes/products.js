@@ -1,15 +1,15 @@
 
-import express from "express";
-import Product from "../models/Product.js";
-import { uploadProductImages, getPublicPath } from "../config/upload.js";
-import { Op } from "sequelize";
-import auth from "../middleware/auth.js";
-import isAdmin from "../middleware/isAdmin.js";
-import Category from "../models/Category.js";
-import SubCategory from "../models/SubCategory.js";
+const express = require("express");
+const Product = require("../models/Product.js");
+const { uploadProductImages, getPublicPath  } = require("../config/upload.js");
+const { Op  } = require("sequelize");
+const auth = require("../middleware/auth.js");
+const isAdmin = require("../middleware/isAdmin.js");
+const Category = require("../models/Category.js");
+const SubCategory = require("../models/SubCategory.js");
 
 
-import optionalAuth from "../middleware/optionalAuth.js";
+const optionalAuth = require("../middleware/optionalAuth.js");
 
 
 const router = express.Router();
@@ -237,5 +237,5 @@ router.delete("/:id", auth, isAdmin, async (req, res) => {
   }
 });
 
-export default router;
+module.exports = router;
 

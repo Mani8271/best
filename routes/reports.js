@@ -1,16 +1,16 @@
-import express from "express";
-import auth from "../middleware/auth.js";
-import { Op, Sequelize } from "sequelize";
-import { DateTime } from "luxon";
-import { sequelize } from "../config/db.js";
+const express = require("express");
+const auth = require("../middleware/auth.js");
+const { Op, Sequelize  } = require("sequelize");
+const { DateTime  } = require("luxon");
+const { sequelize  } = require("../config/db.js");
 
-import User from "../models/User.js";
-import Product from "../models/Product.js";
-import Wallet from "../models/Wallet.js";
-import WalletTransaction from "../models/WalletTransaction.js";
-import PairMatch from "../models/PairMatch.js";
-import PairPending from "../models/PairPending.js";
-import BinaryNode from "../models/BinaryNode.js";
+const User = require("../models/User.js");
+const Product = require("../models/Product.js");
+const Wallet = require("../models/Wallet.js");
+const WalletTransaction = require("../models/WalletTransaction.js");
+const PairMatch = require("../models/PairMatch.js");
+const PairPending = require("../models/PairPending.js");
+const BinaryNode = require("../models/BinaryNode.js");
 
 const router = express.Router();
 
@@ -525,4 +525,4 @@ router.get("/admin/stock-summary", auth, async (req, res) => {
   }
 });
 
-export default router;
+module.exports = router;

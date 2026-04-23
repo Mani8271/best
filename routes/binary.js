@@ -1,12 +1,12 @@
-import express from "express";
-import auth from "../middleware/auth.js";
-import isAdmin from "../middleware/isAdmin.js";
-import { Op } from "sequelize";
+const express = require("express");
+const auth = require("../middleware/auth.js");
+const isAdmin = require("../middleware/isAdmin.js");
+const { Op  } = require("sequelize");
 
-import User from "../models/User.js";
-import BinaryNode from "../models/BinaryNode.js";
-import PairPending from "../models/PairPending.js";
-import PairMatch from "../models/PairMatch.js";
+const User = require("../models/User.js");
+const BinaryNode = require("../models/BinaryNode.js");
+const PairPending = require("../models/PairPending.js");
+const PairMatch = require("../models/PairMatch.js");
 
 const router = express.Router();
 
@@ -384,4 +384,4 @@ router.get("/admin/tree", auth, isAdmin, async (req, res) => {
   }
 });
 
-export default router;
+module.exports = router;

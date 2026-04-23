@@ -1,7 +1,7 @@
-// import express from "express";
-// import auth from "../middleware/auth.js";
-// import isAdmin from "../middleware/isAdmin.js";
-// import AppSetting from "../models/AppSetting.js";
+// const express = require("express");
+// const auth = require("../middleware/auth.js");
+// const isAdmin = require("../middleware/isAdmin.js");
+// const AppSetting = require("../models/AppSetting.js");
 
 // const router = express.Router();
 
@@ -33,11 +33,11 @@
 //   res.json({ msg: "Saved", key: row.key, value: row.value });
 // });
 
-// // export default router;
-// import express from "express";
-// import auth from "../middleware/auth.js";
-// import isAdmin from "../middleware/isAdmin.js";
-// import AppSetting from "../models/AppSetting.js";
+// // module.exports = router;
+// const express = require("express");
+// const auth = require("../middleware/auth.js");
+// const isAdmin = require("../middleware/isAdmin.js");
+// const AppSetting = require("../models/AppSetting.js");
 
 // const router = express.Router();
 
@@ -63,11 +63,11 @@
 //   res.json({ msg: "Saved", setting: row });
 // });
 
-// export default router;
+// module.exports = router;
 
-import express from "express";
-import auth from "../middleware/auth.js";
-import AppSetting from "../models/AppSetting.js";
+const express = require("express");
+const auth = require("../middleware/auth.js");
+const AppSetting = require("../models/AppSetting.js");
 
 const router = express.Router();
 
@@ -166,4 +166,4 @@ router.delete("/:key", auth, async (req, res) => {
   }
 });
 
-export default router;
+module.exports = router;

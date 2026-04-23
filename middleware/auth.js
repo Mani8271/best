@@ -1,7 +1,7 @@
-import jwt from "jsonwebtoken";
-import User from "../models/User.js";
+const jwt = require("jsonwebtoken");
+const User = require("../models/User.js");
 
-export default async function auth(req, res, next) {
+async function auth(req, res, next) {
   const header = req.headers.authorization || "";
   const token = header.startsWith("Bearer ") ? header.split(" ")[1] : null;
 
@@ -30,3 +30,5 @@ export default async function auth(req, res, next) {
     return res.status(401).json({ msg: "Invalid token" });
   }
 }
+
+module.exports = auth;

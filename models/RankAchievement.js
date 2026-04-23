@@ -1,5 +1,5 @@
-import { DataTypes } from "sequelize";
-import { sequelize } from "../config/db.js";
+const { DataTypes } = require("sequelize");
+const { sequelize } = require("../config/db.js");
 
 const RankAchievement = sequelize.define(
   "RankAchievement",
@@ -34,4 +34,4 @@ const RankAchievement = sequelize.define(
   }
 );
 
-export default RankAchievement;
+module.exports = RankAchievement;

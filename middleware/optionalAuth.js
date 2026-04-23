@@ -1,7 +1,7 @@
-import jwt from "jsonwebtoken";
-import User from "../models/User.js";
+const jwt = require("jsonwebtoken");
+const User = require("../models/User.js");
 
-export default async function optionalAuth(req, res, next) {
+async function optionalAuth(req, res, next) {
     const header = req.headers.authorization || "";
     const token = header.startsWith("Bearer ") ? header.split(" ")[1] : null;
 
@@ -36,3 +36,5 @@ export default async function optionalAuth(req, res, next) {
         next();
     }
 }
+
+module.exports = optionalAuth;

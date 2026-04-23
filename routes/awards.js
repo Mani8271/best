@@ -1,12 +1,12 @@
-import express from "express";
-import auth from "../middleware/auth.js";
-import isAdmin from "../middleware/isAdmin.js";
-import { Op, fn, col } from "sequelize";
+const express = require("express");
+const auth = require("../middleware/auth.js");
+const isAdmin = require("../middleware/isAdmin.js");
+const { Op, fn, col  } = require("sequelize");
 
-import PairMatch from "../models/PairMatch.js";
-import RankSetting from "../models/RankSetting.js";
-import RankAchievement from "../models/RankAchievement.js";
-import User from "../models/User.js";
+const PairMatch = require("../models/PairMatch.js");
+const RankSetting = require("../models/RankSetting.js");
+const RankAchievement = require("../models/RankAchievement.js");
+const User = require("../models/User.js");
 
 const router = express.Router();
 
@@ -327,4 +327,4 @@ router.delete("/admin/settings/:id", auth, async (req, res) => {
 
 
 
-export default router;
+module.exports = router;

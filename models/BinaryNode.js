@@ -1,5 +1,5 @@
-import { DataTypes } from "sequelize";
-import { sequelize } from "../config/db.js";
+const { DataTypes } = require("sequelize");
+const { sequelize } = require("../config/db.js");
 
 const BinaryNode = sequelize.define("BinaryNode", {
   userPkId: { type: DataTypes.STRING(12), allowNull: false, unique: true },
@@ -28,4 +28,4 @@ const BinaryNode = sequelize.define("BinaryNode", {
   ]
 });
 
-export default BinaryNode;
+module.exports = BinaryNode;

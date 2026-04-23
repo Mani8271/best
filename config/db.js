@@ -1,7 +1,7 @@
-import dotenv from 'dotenv'
+const dotenv = require('dotenv')
 dotenv.config()
-import { Sequelize } from 'sequelize'
-export const sequelize = new Sequelize(
+const { Sequelize } = require('sequelize')
+const sequelize = new Sequelize(
   process.env.DB_NAME,
   process.env.DB_USER,
   process.env.DB_PASS,
@@ -17,3 +17,5 @@ export const sequelize = new Sequelize(
     logging: false, // Disable logging for production performance
   }
 )
+
+exports.sequelize = sequelize;

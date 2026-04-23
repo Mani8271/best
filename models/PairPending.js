@@ -1,5 +1,5 @@
-import { DataTypes } from "sequelize";
-import { sequelize } from "../config/db.js";
+const { DataTypes } = require("sequelize");
+const { sequelize } = require("../config/db.js");
 
 const PairPending = sequelize.define(
   "PairPending",
@@ -25,4 +25,4 @@ const PairPending = sequelize.define(
   }
 );
 
-export default PairPending;
+module.exports = PairPending;

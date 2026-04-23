@@ -1,10 +1,10 @@
-import express from "express";
-import Razorpay from "razorpay";
-import crypto from "crypto";
-import auth from "../middleware/auth.js";
+const express = require("express");
+const Razorpay = require("razorpay");
+const crypto = require("crypto");
+const auth = require("../middleware/auth.js");
 
-import Order from "../models/Order.js";
-import Payment from "../models/Payment.js";
+const Order = require("../models/Order.js");
+const Payment = require("../models/Payment.js");
 
 const router = express.Router();
 
@@ -148,4 +148,4 @@ router.post("/failed", auth, async (req, res) => {
   }
 });
 
-export default router;
+module.exports = router;

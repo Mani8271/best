@@ -1,9 +1,9 @@
-import express from "express";
-import auth from "../middleware/auth.js";
-import Payment from "../models/Payment.js";
-import Order from "../models/Order.js";
-import isAdmin from "../middleware/isAdmin.js";
-import User from "../models/User.js";
+const express = require("express");
+const auth = require("../middleware/auth.js");
+const Payment = require("../models/Payment.js");
+const Order = require("../models/Order.js");
+const isAdmin = require("../middleware/isAdmin.js");
+const User = require("../models/User.js");
 
 const router = express.Router();
 router.get("/admin/all", auth, isAdmin, async (req, res) => {
@@ -149,4 +149,4 @@ router.get("/order/:orderId", auth, async (req, res) => {
 
 
 
-export default router;
+module.exports = router;

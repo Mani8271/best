@@ -1,5 +1,5 @@
-import { DataTypes } from "sequelize";
-import { sequelize } from "../config/db.js";
+const { DataTypes } = require("sequelize");
+const { sequelize } = require("../config/db.js");
 
 const SubCategory = sequelize.define(
   "SubCategory",
@@ -15,4 +15,4 @@ const SubCategory = sequelize.define(
   }
 );
 
-export default SubCategory;
+module.exports = SubCategory;

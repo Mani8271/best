@@ -1,5 +1,5 @@
-import { DataTypes } from "sequelize";
-import { sequelize } from "../config/db.js";
+const { DataTypes } = require("sequelize");
+const { sequelize } = require("../config/db.js");
 
 const ReferralEdge = sequelize.define(
   "ReferralEdge",
@@ -13,4 +13,4 @@ const ReferralEdge = sequelize.define(
   { timestamps: true }
 );
 
-export default ReferralEdge;
+module.exports = ReferralEdge;

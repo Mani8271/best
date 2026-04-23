@@ -1,7 +1,7 @@
-import express from "express";
-import auth from "../middleware/auth.js";
-import User from "../models/User.js";
-import BinaryNode from "../models/BinaryNode.js";
+const express = require("express");
+const auth = require("../middleware/auth.js");
+const User = require("../models/User.js");
+const BinaryNode = require("../models/BinaryNode.js");
 
 const router = express.Router();
 
@@ -221,4 +221,4 @@ router.get("/stats", auth, async (req, res) => {
   }
 });
 
-export default router;
+module.exports = router;

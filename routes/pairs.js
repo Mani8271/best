@@ -1,11 +1,11 @@
-import express from "express";
-import { Op } from "sequelize";
+const express = require("express");
+const { Op  } = require("sequelize");
 
-import auth from "../middleware/auth.js";
-import isAdmin from "../middleware/isAdmin.js";
+const auth = require("../middleware/auth.js");
+const isAdmin = require("../middleware/isAdmin.js");
 
-import PairMatch from "../models/PairMatch.js";
-import User from "../models/User.js";
+const PairMatch = require("../models/PairMatch.js");
+const User = require("../models/User.js");
 
 const router = express.Router();
 
@@ -155,4 +155,4 @@ router.get("/admin", auth, isAdmin, async (req, res) => {
   }
 });
 
-export default router;
+module.exports = router;

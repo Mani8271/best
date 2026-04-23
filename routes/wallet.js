@@ -1,11 +1,11 @@
-import express from "express";
-import { Op, Sequelize } from "sequelize";
-import auth from "../middleware/auth.js";
-import Wallet from "../models/Wallet.js";
-import WalletTransaction from "../models/WalletTransaction.js";
-import isAdmin from "../middleware/isAdmin.js";
-import User from "../models/User.js";
-import PairMatch from "../models/PairMatch.js";
+const express = require("express");
+const { Op, Sequelize  } = require("sequelize");
+const auth = require("../middleware/auth.js");
+const Wallet = require("../models/Wallet.js");
+const WalletTransaction = require("../models/WalletTransaction.js");
+const isAdmin = require("../middleware/isAdmin.js");
+const User = require("../models/User.js");
+const PairMatch = require("../models/PairMatch.js");
 
 
 const router = express.Router();
@@ -246,4 +246,4 @@ router.get("/summary", auth, async (req, res) => {
   });
 });
 
-export default router;
+module.exports = router;

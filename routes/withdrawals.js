@@ -1,14 +1,14 @@
 // routes/withdrawals.js
-import express from "express";
-import { Op } from "sequelize";
-import { sequelize } from "../config/db.js";
+const express = require("express");
+const { Op  } = require("sequelize");
+const { sequelize  } = require("../config/db.js");
 
-import User from "../models/User.js";
-import Wallet from "../models/Wallet.js";
-import WalletTransaction from "../models/WalletTransaction.js";
-import auth from "../middleware/auth.js";
-import isAdmin from "../middleware/isAdmin.js";
-import { getSettingNumber } from "../utils/appSettings.js";
+const User = require("../models/User.js");
+const Wallet = require("../models/Wallet.js");
+const WalletTransaction = require("../models/WalletTransaction.js");
+const auth = require("../middleware/auth.js");
+const isAdmin = require("../middleware/isAdmin.js");
+const { getSettingNumber  } = require("../utils/appSettings.js");
 
 const router = express.Router();
 
@@ -400,5 +400,5 @@ router.put("/:id/action", auth, async (req, res) => {
   }
 });
 
-export default router;
+module.exports = router;
 

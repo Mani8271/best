@@ -1,6 +1,6 @@
 // models/Banner.js
-import { DataTypes } from "sequelize";
-import { sequelize } from "../config/db.js";
+const { DataTypes } = require("sequelize");
+const { sequelize } = require("../config/db.js");
 
 const Banner = sequelize.define(
   "Banner",
@@ -33,4 +33,4 @@ const Banner = sequelize.define(
   { tableName: "banners" }
 );
 
-export default Banner;
+module.exports = Banner;

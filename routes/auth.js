@@ -1,32 +1,32 @@
 
 
 // ========================= routes/auth.js (FULL CODE) =========================// routes/auth.js (FULL CODE)  ✅ ROLE=ADMIN direct create ✅ JOIN+PAIR pending until 30k unlock ✅ PairPending + PairMatch
-import express from "express";
-import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
-import { sequelize } from "../config/db.js";
-import { Op } from "sequelize";
+const express = require("express");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const { sequelize } = require("../config/db.js");
+const { Op } = require("sequelize");
 
-import User from "../models/User.js";
-import Wallet from "../models/Wallet.js";
-import WalletTransaction from "../models/WalletTransaction.js";
+const User = require("../models/User.js");
+const Wallet = require("../models/Wallet.js");
+const WalletTransaction = require("../models/WalletTransaction.js");
 
-import Referral from "../models/Referral.js";
-import ReferralLink from "../models/ReferralLink.js";
-import BinaryNode from "../models/BinaryNode.js";
+const Referral = require("../models/Referral.js");
+const ReferralLink = require("../models/ReferralLink.js");
+const BinaryNode = require("../models/BinaryNode.js");
 
-import PairPending from "../models/PairPending.js";
-import PairMatch from "../models/PairMatch.js";
-import { getSettingNumber } from "../config/settings.js";
-import { uploadUserDocs, uploadProfilePic, getPublicPath } from "../config/upload.js";
-import auth from "../middleware/auth.js";
-import { createDefaultReferralLinks } from "./referrals.js";
-import { checkAndGrantAwards } from "../config/awardRewards.js";
-import Address from "../models/Address.js";
-import Order from "../models/Order.js";
-import OrderItem from "../models/OrderItem.js";
-import Product from "../models/Product.js";
-import optionalAuth from "../middleware/optionalAuth.js";
+const PairPending = require("../models/PairPending.js");
+const PairMatch = require("../models/PairMatch.js");
+const { getSettingNumber } = require("../config/settings.js");
+const { uploadUserDocs, uploadProfilePic, getPublicPath } = require("../config/upload.js");
+const auth = require("../middleware/auth.js");
+const { createDefaultReferralLinks } = require("./referrals.js");
+const { checkAndGrantAwards } = require("../config/awardRewards.js");
+const Address = require("../models/Address.js");
+const Order = require("../models/Order.js");
+const OrderItem = require("../models/OrderItem.js");
+const Product = require("../models/Product.js");
+const optionalAuth = require("../middleware/optionalAuth.js");
 
 const router = express.Router();
 
@@ -542,7 +542,7 @@ async function getAllBinaryDownlineIds(rootUserId) {
   let queue = [rootUserId];
   while (queue.length > 0) {
     const batch = queue.splice(0, 50);
-    const nodes = await (await import("../models/BinaryNode.js")).default.findAll({
+    const nodes = await require("../models/BinaryNode.js").findAll({
       where: { userId: { [Op.in]: batch } },
       attributes: ["userId", "leftChildId", "rightChildId"]
     });
@@ -559,7 +559,7 @@ async function getAllBinaryDownlineIds(rootUserId) {
  * ✅ NEW: Triggered when user UPGRADES to ENTREPRENEUR
  * Increments upline entrepreneur counts and unlocks pending PAIR_BONUS if possible.
  */
-export async function updateUplineEntrepreneurCounts({ newlyUpgradedUserId, t }) {
+async function updateUplineEntrepreneurCounts({ newlyUpgradedUserId, t }) {
   const bnode = await BinaryNode.findOne({ where: { userId: newlyUpgradedUserId }, transaction: t });
   if (!bnode || !bnode.parentId) return;
 
@@ -1331,4 +1331,5 @@ router.get("/welcome-letter", auth, async (req, res) => {
 
 
 
-export default router;
+module.exports = router;
+router.updateUplineEntrepreneurCounts = updateUplineEntrepreneurCounts;

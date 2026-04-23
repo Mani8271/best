@@ -1,10 +1,10 @@
-import express from "express";
-import Category from "../models/Category.js";
-import SubCategory from "../models/SubCategory.js";
-import auth from "../middleware/auth.js";
-import isAdmin from "../middleware/isAdmin.js";
-import optionalAuth from "../middleware/optionalAuth.js";
-import { uploadSubCategoryImage, getPublicPath } from "../config/upload.js";
+const express = require("express");
+const Category = require("../models/Category.js");
+const SubCategory = require("../models/SubCategory.js");
+const auth = require("../middleware/auth.js");
+const isAdmin = require("../middleware/isAdmin.js");
+const optionalAuth = require("../middleware/optionalAuth.js");
+const { uploadSubCategoryImage, getPublicPath  } = require("../config/upload.js");
 
 const router = express.Router();
 
@@ -130,4 +130,4 @@ router.delete("/:id", auth, async (req, res) => {
   }
 });
 
-export default router;
+module.exports = router;

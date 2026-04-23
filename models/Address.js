@@ -1,5 +1,5 @@
-import { DataTypes } from "sequelize";
-import { sequelize } from "../config/db.js";
+const { DataTypes } = require("sequelize");
+const { sequelize } = require("../config/db.js");
 
 const Address = sequelize.define(
   "Address",
@@ -28,4 +28,4 @@ const Address = sequelize.define(
   { timestamps: true }
 );
 
-export default Address;
+module.exports = Address;
