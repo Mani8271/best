@@ -6,8 +6,8 @@ import { sequelize } from './config/db.js'
 import authRoutes from './routes/auth.js'
 import productRoutes from "./routes/products.js";
 import orderRoutes from "./routes/orders.js";
-
-import { UPLOAD_ROOT } from "./config/upload.js";
+import pkg from "./config/upload.js";
+const { UPLOAD_ROOT } = pkg;
 import Cart from "./models/Cart.js";
 import CartItem from "./models/CartItem.js";
 import User from "./models/User.js";
