@@ -7,33 +7,331 @@ const isAdmin = require("../middleware/isAdmin.js");
 const User = require("../models/User.js");
 const Investment = require("../models/Investment.js");
 const InvestmentTransaction = require("../models/InvestmentTransaction.js");
+const InvestmentWithdrawal = require("../models/InvestmentWithdrawal.js");
+const InvestmentBankDetail = require("../models/InvestmentBankDetail.js");
+const AppSetting = require("../models/AppSetting.js");
+const { getSettingNumber } = require("../config/settings.js");
 
 const router = express.Router();
 
-// Level commission percentage rates
-const LEVEL_COMMISSION_RATES = {
-  1: 0.02,   // 2.0%
-  2: 0.01,   // 1.0%
-  3: 0.005,  // 0.5%
-  4: 0.0025, // 0.25%
+// Plan Configuration Rates
+const PLAN_CONFIGS = {
+  DEFAULT_50K: {
+    name: "Standard Investment Plan (₹50,000)",
+    minAmount: 50000,
+    monthlyRoiPercent: 5.0, // 5%
+    commissions: { 1: 0.02, 2: 0.01, 3: 0.005, 4: 0.0025 }, // 2%, 1%, 0.5%, 0.25%
+  },
+  FARMLAND_6L: {
+    name: "Farm Land Purchaser Security Plan (₹6,00,000)",
+    minAmount: 600000,
+    monthlyRoiPercent: 3.0, // 3% = ₹18,000/month
+    commissions: { 1: 0.01, 2: 0.005, 3: 0.0025, 4: 0.00125 }, // 1%, 0.5%, 0.25%, 0.125%
+  },
+  FRANCHISE_6L: {
+    name: "Franchise Growth / Pharmacy Plan (₹6,00,000)",
+    minAmount: 600000,
+    monthlyRoiFixed: 16500, // ₹16,500/month for 36 months
+    commissions: { 1: 0.01, 2: 0.005, 3: 0.0025, 4: 0.00125 }, // 1%, 0.5%, 0.25%, 0.125%
+  },
 };
 
 /**
+ * Helper function to build 4-level downline tree for any root user
+ */
+async function build4LevelTree(rootUserId) {
+  const investmentInclude = [
+    {
+      model: Investment,
+      required: true, // Only return users who have an Investment account created
+      attributes: ["totalInvested", "activeInvestment", "status"],
+    },
+  ];
+
+  // Level 1
+  const level1Users = await User.findAll({
+    where: { sponsorId: rootUserId },
+    attributes: ["id", "name", "userID", "email", "phone", "createdAt", "sponsorId"],
+    include: investmentInclude,
+  });
+
+  const level1Ids = level1Users.map((u) => u.id);
+
+  // Level 2
+  let level2Users = [];
+  if (level1Ids.length > 0) {
+    level2Users = await User.findAll({
+      where: { sponsorId: { [Op.in]: level1Ids } },
+      attributes: ["id", "name", "userID", "email", "phone", "createdAt", "sponsorId"],
+      include: investmentInclude,
+    });
+  }
+  const level2Ids = level2Users.map((u) => u.id);
+
+  // Level 3
+  let level3Users = [];
+  if (level2Ids.length > 0) {
+    level3Users = await User.findAll({
+      where: { sponsorId: { [Op.in]: level2Ids } },
+      attributes: ["id", "name", "userID", "email", "phone", "createdAt", "sponsorId"],
+      include: investmentInclude,
+    });
+  }
+  const level3Ids = level3Users.map((u) => u.id);
+
+  // Level 4
+  let level4Users = [];
+  if (level3Ids.length > 0) {
+    level4Users = await User.findAll({
+      where: { sponsorId: { [Op.in]: level3Ids } },
+      attributes: ["id", "name", "userID", "email", "phone", "createdAt", "sponsorId"],
+      include: investmentInclude,
+    });
+  }
+
+
+  const allDownlineUsers = [...level1Users, ...level2Users, ...level3Users, ...level4Users];
+  const totalDownlines = allDownlineUsers.length;
+
+  let totalActiveInvestment = 0;
+  let totalInvested = 0;
+
+  allDownlineUsers.forEach((u) => {
+    if (u.Investment) {
+      totalActiveInvestment += Number(u.Investment.activeInvestment || 0);
+      totalInvested += Number(u.Investment.totalInvested || 0);
+    }
+  });
+
+  return {
+    summary: {
+      totalDownlines,
+      totalActiveInvestment,
+      totalInvested,
+      levelCounts: {
+        level1: level1Users.length,
+        level2: level2Users.length,
+        level3: level3Users.length,
+        level4: level4Users.length,
+      },
+    },
+    tree: {
+      level1: level1Users,
+      level2: level2Users,
+      level3: level3Users,
+      level4: level4Users,
+    },
+  };
+}
+
+/* ======================================================================================
+   ⚙️ DYNAMIC INVESTMENT ADMIN SETTINGS APIs
+====================================================================================== */
+
+/**
+ * @route   GET /api/investment/admin/settings
+ * @desc    Get all dynamic investment settings (Min withdrawal, ROI %, Level 1-4 Commission %).
+ * @access  Admin / Master / Staff
+ */
+router.get("/admin/settings", auth, isAdmin, async (req, res) => {
+  try {
+    const minWithdrawalAmount = await getSettingNumber("INVESTMENT_MIN_WITHDRAWAL", 2500);
+    const roiPercent = await getSettingNumber("INVESTMENT_ROI_PERCENT", 5);
+    const level1Percent = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", 2);
+    const level2Percent = await getSettingNumber("INVESTMENT_LEVEL_2_PERCENT", 1);
+    const level3Percent = await getSettingNumber("INVESTMENT_LEVEL_3_PERCENT", 0.5);
+    const level4Percent = await getSettingNumber("INVESTMENT_LEVEL_4_PERCENT", 0.25);
+
+    return res.status(200).json({
+      success: true,
+      settings: {
+        INVESTMENT_MIN_WITHDRAWAL: minWithdrawalAmount,
+        minWithdrawalAmount,
+        INVESTMENT_ROI_PERCENT: roiPercent,
+        roiPercent,
+        levelCommissions: {
+          level1Percent,
+          level2Percent,
+          level3Percent,
+          level4Percent,
+        },
+      },
+    });
+  } catch (err) {
+    console.error("Get Investment Admin Settings Error:", err);
+    return res.status(500).json({ msg: "Failed to fetch admin settings", error: err.message });
+  }
+});
+
+/**
+ * Helper to update key-value pair in AppSetting table
+ */
+async function updateAppSetting(key, val) {
+  if (val !== undefined && !isNaN(Number(val))) {
+    const num = Number(val);
+    const [setting] = await AppSetting.findOrCreate({
+      where: { key },
+      defaults: { key, value: String(num) },
+    });
+    setting.value = String(num);
+    await setting.save();
+    return num;
+  }
+  return null;
+}
+
+/**
+ * @route   POST /api/investment/admin/settings
+ * @desc    Update dynamic investment settings (Min withdrawal, ROI %, Level 1-4 Commission %).
+ * @access  Admin / Master / Staff
+ */
+router.post("/admin/settings", auth, isAdmin, async (req, res) => {
+  try {
+    const {
+      minWithdrawalAmount,
+      value,
+      roiPercent,
+      level1Percent,
+      level2Percent,
+      level3Percent,
+      level4Percent,
+    } = req.body;
+
+    const targetMinWithdrawal = minWithdrawalAmount !== undefined ? minWithdrawalAmount : value;
+
+    if (targetMinWithdrawal !== undefined) {
+      await updateAppSetting("INVESTMENT_MIN_WITHDRAWAL", targetMinWithdrawal);
+    }
+    if (roiPercent !== undefined) {
+      await updateAppSetting("INVESTMENT_ROI_PERCENT", roiPercent);
+    }
+    if (level1Percent !== undefined) {
+      await updateAppSetting("INVESTMENT_LEVEL_1_PERCENT", level1Percent);
+    }
+    if (level2Percent !== undefined) {
+      await updateAppSetting("INVESTMENT_LEVEL_2_PERCENT", level2Percent);
+    }
+    if (level3Percent !== undefined) {
+      await updateAppSetting("INVESTMENT_LEVEL_3_PERCENT", level3Percent);
+    }
+    if (level4Percent !== undefined) {
+      await updateAppSetting("INVESTMENT_LEVEL_4_PERCENT", level4Percent);
+    }
+
+    const currentMinWithdrawal = await getSettingNumber("INVESTMENT_MIN_WITHDRAWAL", 2500);
+    const currentRoi = await getSettingNumber("INVESTMENT_ROI_PERCENT", 5);
+    const currentL1 = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", 2);
+    const currentL2 = await getSettingNumber("INVESTMENT_LEVEL_2_PERCENT", 1);
+    const currentL3 = await getSettingNumber("INVESTMENT_LEVEL_3_PERCENT", 0.5);
+    const currentL4 = await getSettingNumber("INVESTMENT_LEVEL_4_PERCENT", 0.25);
+
+    return res.status(200).json({
+      success: true,
+      msg: "Dynamic investment settings updated successfully",
+      settings: {
+        minWithdrawalAmount: currentMinWithdrawal,
+        roiPercent: currentRoi,
+        levelCommissions: {
+          level1Percent: currentL1,
+          level2Percent: currentL2,
+          level3Percent: currentL3,
+          level4Percent: currentL4,
+        },
+      },
+    });
+  } catch (err) {
+    console.error("Update Investment Admin Settings Error:", err);
+    return res.status(500).json({ msg: "Failed to update admin settings", error: err.message });
+  }
+});
+
+/**
+ * @route   PUT /api/investment/admin/settings
+ * @desc    PUT alias for updating dynamic investment settings.
+ * @access  Admin / Master / Staff
+ */
+router.put("/admin/settings", auth, isAdmin, async (req, res) => {
+  try {
+    const {
+      minWithdrawalAmount,
+      value,
+      roiPercent,
+      level1Percent,
+      level2Percent,
+      level3Percent,
+      level4Percent,
+    } = req.body;
+
+    const targetMinWithdrawal = minWithdrawalAmount !== undefined ? minWithdrawalAmount : value;
+
+    if (targetMinWithdrawal !== undefined) {
+      await updateAppSetting("INVESTMENT_MIN_WITHDRAWAL", targetMinWithdrawal);
+    }
+    if (roiPercent !== undefined) {
+      await updateAppSetting("INVESTMENT_ROI_PERCENT", roiPercent);
+    }
+    if (level1Percent !== undefined) {
+      await updateAppSetting("INVESTMENT_LEVEL_1_PERCENT", level1Percent);
+    }
+    if (level2Percent !== undefined) {
+      await updateAppSetting("INVESTMENT_LEVEL_2_PERCENT", level2Percent);
+    }
+    if (level3Percent !== undefined) {
+      await updateAppSetting("INVESTMENT_LEVEL_3_PERCENT", level3Percent);
+    }
+    if (level4Percent !== undefined) {
+      await updateAppSetting("INVESTMENT_LEVEL_4_PERCENT", level4Percent);
+    }
+
+    const currentMinWithdrawal = await getSettingNumber("INVESTMENT_MIN_WITHDRAWAL", 2500);
+    const currentRoi = await getSettingNumber("INVESTMENT_ROI_PERCENT", 5);
+    const currentL1 = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", 2);
+    const currentL2 = await getSettingNumber("INVESTMENT_LEVEL_2_PERCENT", 1);
+    const currentL3 = await getSettingNumber("INVESTMENT_LEVEL_3_PERCENT", 0.5);
+    const currentL4 = await getSettingNumber("INVESTMENT_LEVEL_4_PERCENT", 0.25);
+
+    return res.status(200).json({
+      success: true,
+      msg: "Dynamic investment settings updated successfully",
+      settings: {
+        minWithdrawalAmount: currentMinWithdrawal,
+        roiPercent: currentRoi,
+        levelCommissions: {
+          level1Percent: currentL1,
+          level2Percent: currentL2,
+          level3Percent: currentL3,
+          level4Percent: currentL4,
+        },
+      },
+    });
+  } catch (err) {
+    console.error("Update Investment Admin Settings Error:", err);
+    return res.status(500).json({ msg: "Failed to update admin settings", error: err.message });
+  }
+});
+
+
+/**
  * @route   POST /api/investment/admin/topup
- * @desc    Admin loads investment money into a user's Investment Wallet using userID or user pk ID.
+ * @desc    Admin loads investment money into a user's Investment Wallet by userID.
+ *          Supports optional sponsorUserID / referralCode to link sponsor at top-up time.
+ *          Supports optional planType (DEFAULT_50K, FARMLAND_6L, FRANCHISE_6L).
  *          Automatically distributes 4-Level commissions to upline sponsors.
  * @access  Admin / Master / Staff
  */
 router.post("/admin/topup", auth, isAdmin, async (req, res) => {
   const t = await sequelize.transaction();
   try {
-    const { userID, userId, amount, remark } = req.body;
+    const { userID, userId, amount, planType, remark, sponsorUserID, sponsorReferralCode, referralCode } = req.body;
 
     const numAmount = Number(amount);
-    if (!numAmount || isNaN(numAmount) || numAmount < 50000) {
+    const selectedPlanKey = planType && PLAN_CONFIGS[planType] ? planType : "DEFAULT_50K";
+    const planConfig = PLAN_CONFIGS[selectedPlanKey];
+
+    if (!numAmount || isNaN(numAmount) || numAmount < planConfig.minAmount) {
       await t.rollback();
       return res.status(400).json({
-        msg: "Minimum investment amount is ₹50,000",
+        msg: `Minimum investment amount for ${planConfig.name} is ₹${planConfig.minAmount.toLocaleString("en-IN")}`,
       });
     }
 
@@ -57,6 +355,25 @@ router.post("/admin/topup", auth, isAdmin, async (req, res) => {
     if (!targetUser) {
       await t.rollback();
       return res.status(404).json({ msg: "User not found with the provided ID" });
+    }
+
+    // 0. Optional: Link Sponsor ID if sponsorUserID / referralCode passed during top-up
+    const targetSponsorCode = sponsorUserID || sponsorReferralCode || referralCode;
+    if (targetSponsorCode) {
+      const sponsorUser = await User.findOne({
+        where: {
+          [Op.or]: [
+            { userID: String(targetSponsorCode).trim() },
+            { referralCode: String(targetSponsorCode).trim() },
+          ],
+        },
+        transaction: t,
+      });
+
+      if (sponsorUser && targetUser.sponsorId !== sponsorUser.id) {
+        targetUser.sponsorId = sponsorUser.id;
+        await targetUser.save({ transaction: t });
+      }
     }
 
     // 1. Find or create Investment wallet for target user
@@ -86,10 +403,12 @@ router.post("/admin/topup", auth, isAdmin, async (req, res) => {
         type: "DEPOSIT",
         amount: numAmount,
         createdAdminId: req.user.id,
-        description: remark || `Investment deposit of ₹${numAmount.toLocaleString("en-IN")} added by Admin`,
+        description: remark || `Investment deposit of ₹${numAmount.toLocaleString("en-IN")} [${planConfig.name}] added by Admin`,
         meta: {
           adminId: req.user.id,
           adminName: req.user.name || "Admin",
+          planType: selectedPlanKey,
+          planName: planConfig.name,
           remark: remark || null,
         },
       },
@@ -99,6 +418,18 @@ router.post("/admin/topup", auth, isAdmin, async (req, res) => {
     // 3. Traversal Upline 4-Levels for Commission Distribution
     const commissionsDistributed = [];
     let currentUserId = targetUser.id;
+
+    const level1Pct = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", (planConfig.commissions[1] || 0.02) * 100);
+    const level2Pct = await getSettingNumber("INVESTMENT_LEVEL_2_PERCENT", (planConfig.commissions[2] || 0.01) * 100);
+    const level3Pct = await getSettingNumber("INVESTMENT_LEVEL_3_PERCENT", (planConfig.commissions[3] || 0.005) * 100);
+    const level4Pct = await getSettingNumber("INVESTMENT_LEVEL_4_PERCENT", (planConfig.commissions[4] || 0.0025) * 100);
+
+    const rates = {
+      1: level1Pct / 100,
+      2: level2Pct / 100,
+      3: level3Pct / 100,
+      4: level4Pct / 100,
+    };
 
     for (let level = 1; level <= 4; level++) {
       const currentUserNode = await User.findByPk(currentUserId, {
@@ -119,7 +450,7 @@ router.post("/admin/topup", auth, isAdmin, async (req, res) => {
         break;
       }
 
-      const rate = LEVEL_COMMISSION_RATES[level] || 0;
+      const rate = rates[level] || 0;
       if (rate > 0) {
         const commAmount = Number((numAmount * rate).toFixed(2));
 
@@ -148,11 +479,12 @@ router.post("/admin/topup", auth, isAdmin, async (req, res) => {
             level,
             fromUserId: targetUser.id,
             createdAdminId: req.user.id,
-            description: `Level ${level} Commission (${(rate * 100).toFixed(2)}%) from ${targetUser.name} (${targetUser.userID}) investment of ₹${numAmount.toLocaleString("en-IN")}`,
+            description: `Level ${level} Commission (${(rate * 100).toFixed(3)}%) from ${targetUser.name} (${targetUser.userID}) investment of ₹${numAmount.toLocaleString("en-IN")}`,
             meta: {
               level,
               ratePercentage: rate * 100,
               investmentAmount: numAmount,
+              planType: selectedPlanKey,
               investorUserId: targetUser.userID,
               investorName: targetUser.name,
             },
@@ -176,12 +508,13 @@ router.post("/admin/topup", auth, isAdmin, async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      msg: `Investment of ₹${numAmount.toLocaleString("en-IN")} successfully added for user ${targetUser.name} (${targetUser.userID})`,
+      msg: `Investment of ₹${numAmount.toLocaleString("en-IN")} (${planConfig.name}) successfully added for user ${targetUser.name} (${targetUser.userID})`,
       data: {
         targetUser: {
           id: targetUser.id,
           name: targetUser.name,
           userID: targetUser.userID,
+          sponsorId: targetUser.sponsorId,
         },
         investment: {
           totalInvested: Number(investment.totalInvested),
@@ -198,9 +531,233 @@ router.post("/admin/topup", auth, isAdmin, async (req, res) => {
   }
 });
 
+/* ======================================================================================
+   🌳 4-LEVEL REFERRAL TREE & SPONSOR ANALYTICS APIs
+====================================================================================== */
+
+/**
+ * @route   GET /api/investment/referral-info
+ * @desc    Get logged-in user's referral code, userID, and referral info.
+ * @access  Authenticated User
+ */
+router.get("/referral-info", auth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const user = await User.findByPk(userId, {
+      attributes: ["id", "name", "userID", "email", "phone", "referralCode", "sponsorId"],
+      include: [
+        {
+          model: User,
+          as: "sponsor",
+          attributes: ["id", "name", "userID", "referralCode"],
+        },
+      ],
+    });
+
+    return res.status(200).json({
+      success: true,
+      referralInfo: {
+        userID: user.userID,
+        referralCode: user.referralCode,
+        sponsor: user.sponsor || null,
+        referralLink: `http://localhost:3000/register?ref=${user.referralCode}`,
+      },
+    });
+  } catch (err) {
+    console.error("Get Referral Info Error:", err);
+    return res.status(500).json({ msg: "Failed to fetch referral info", error: err.message });
+  }
+});
+
+/**
+ * @route   GET /api/investment/tree
+ * @desc    Get logged-in user's 4-Level Downline Investment Tree.
+ * @access  Authenticated User
+ */
+router.get("/tree", auth, async (req, res) => {
+  try {
+    const rootUserId = req.user.id;
+    const treeData = await build4LevelTree(rootUserId);
+
+    return res.status(200).json({
+      success: true,
+      ...treeData,
+    });
+  } catch (err) {
+    console.error("Get 4-Level Investment Tree Error:", err);
+    return res.status(500).json({ msg: "Failed to fetch 4-level tree", error: err.message });
+  }
+});
+
+/**
+ * @route   GET /api/investment/admin/user-tree/:userID
+ * @desc    Admin endpoint to view 4-Level Investment Tree of any user by userID or PK id.
+ * @access  Admin / Master / Staff
+ */
+router.get("/admin/user-tree/:userID", auth, isAdmin, async (req, res) => {
+  try {
+    const { userID } = req.params;
+
+    const targetUser = await User.findOne({
+      where: {
+        [Op.or]: [{ userID }, { id: isNaN(userID) ? 0 : Number(userID) }],
+      },
+      attributes: ["id", "name", "userID", "email", "phone"],
+    });
+
+    if (!targetUser) {
+      return res.status(404).json({ msg: "User not found" });
+    }
+
+    const treeData = await build4LevelTree(targetUser.id);
+
+    return res.status(200).json({
+      success: true,
+      targetUser,
+      ...treeData,
+    });
+  } catch (err) {
+    console.error("Admin View User Tree Error:", err);
+    return res.status(500).json({ msg: "Failed to fetch user tree", error: err.message });
+  }
+});
+
+/* ======================================================================================
+   🏦 DEDICATED INVESTMENT BANK DETAILS APIs
+====================================================================================== */
+
+/**
+ * @route   POST /api/investment/bank-details
+ * @desc    Save or update dedicated Investment Bank Details for the logged-in user.
+ * @access  Authenticated User
+ */
+router.post("/bank-details", auth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { accountNumber, ifscCode, accountHolderName, bankName, branchName, bankPhoto } = req.body;
+
+    if (!accountNumber || !ifscCode || !accountHolderName) {
+      return res.status(400).json({
+        msg: "accountNumber, ifscCode, and accountHolderName are required",
+      });
+    }
+
+    const [bankDetail, created] = await InvestmentBankDetail.findOrCreate({
+      where: { userId },
+      defaults: {
+        userId,
+        accountNumber: String(accountNumber).trim(),
+        ifscCode: String(ifscCode).trim().toUpperCase(),
+        accountHolderName: String(accountHolderName).trim(),
+        bankName: bankName ? String(bankName).trim() : null,
+        branchName: branchName ? String(branchName).trim() : null,
+        bankPhoto: bankPhoto || null,
+        isVerified: true,
+      },
+    });
+
+    if (!created) {
+      bankDetail.accountNumber = String(accountNumber).trim();
+      bankDetail.ifscCode = String(ifscCode).trim().toUpperCase();
+      bankDetail.accountHolderName = String(accountHolderName).trim();
+      if (bankName !== undefined) bankDetail.bankName = bankName ? String(bankName).trim() : null;
+      if (branchName !== undefined) bankDetail.branchName = branchName ? String(branchName).trim() : null;
+      if (bankPhoto !== undefined) bankDetail.bankPhoto = bankPhoto || null;
+      bankDetail.isVerified = true;
+      await bankDetail.save();
+    }
+
+    return res.status(200).json({
+      success: true,
+      msg: created ? "Investment bank details saved successfully" : "Investment bank details updated successfully",
+      bankDetails: bankDetail,
+    });
+  } catch (err) {
+    console.error("Save Investment Bank Details Error:", err);
+    return res.status(500).json({ msg: "Failed to save bank details", error: err.message });
+  }
+});
+
+/**
+ * @route   PUT /api/investment/bank-details
+ * @desc    Edit / Update dedicated Investment Bank Details for the logged-in user.
+ * @access  Authenticated User
+ */
+router.put("/bank-details", auth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { accountNumber, ifscCode, accountHolderName, bankName, branchName, bankPhoto } = req.body;
+
+    let bankDetail = await InvestmentBankDetail.findOne({
+      where: { userId },
+    });
+
+    if (!bankDetail) {
+      if (!accountNumber || !ifscCode || !accountHolderName) {
+        return res.status(400).json({
+          msg: "No existing bank details found. Please provide accountNumber, ifscCode, and accountHolderName to create.",
+        });
+      }
+
+      bankDetail = await InvestmentBankDetail.create({
+        userId,
+        accountNumber: String(accountNumber).trim(),
+        ifscCode: String(ifscCode).trim().toUpperCase(),
+        accountHolderName: String(accountHolderName).trim(),
+        bankName: bankName ? String(bankName).trim() : null,
+        branchName: branchName ? String(branchName).trim() : null,
+        bankPhoto: bankPhoto || null,
+        isVerified: true,
+      });
+    } else {
+      if (accountNumber !== undefined) bankDetail.accountNumber = String(accountNumber).trim();
+      if (ifscCode !== undefined) bankDetail.ifscCode = String(ifscCode).trim().toUpperCase();
+      if (accountHolderName !== undefined) bankDetail.accountHolderName = String(accountHolderName).trim();
+      if (bankName !== undefined) bankDetail.bankName = bankName ? String(bankName).trim() : null;
+      if (branchName !== undefined) bankDetail.branchName = branchName ? String(branchName).trim() : null;
+      if (bankPhoto !== undefined) bankDetail.bankPhoto = bankPhoto || null;
+      bankDetail.isVerified = true;
+      await bankDetail.save();
+    }
+
+    return res.status(200).json({
+      success: true,
+      msg: "Investment bank details updated successfully",
+      bankDetails: bankDetail,
+    });
+  } catch (err) {
+    console.error("Edit Investment Bank Details Error:", err);
+    return res.status(500).json({ msg: "Failed to update bank details", error: err.message });
+  }
+});
+
+/**
+ * @route   GET /api/investment/bank-details
+ * @desc    Get logged-in user's saved Investment Bank Details.
+ * @access  Authenticated User
+ */
+router.get("/bank-details", auth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const bankDetail = await InvestmentBankDetail.findOne({
+      where: { userId },
+    });
+
+    return res.status(200).json({
+      success: true,
+      bankDetails: bankDetail || null,
+    });
+  } catch (err) {
+    console.error("Get Investment Bank Details Error:", err);
+    return res.status(500).json({ msg: "Failed to fetch bank details", error: err.message });
+  }
+});
+
 /**
  * @route   GET /api/investment/my-wallet
- * @desc    Get current user's investment wallet balance, earnings, and transaction history.
+ * @desc    Get current user's investment wallet balance, earnings, saved bank details, and transaction history.
  * @access  Authenticated User
  */
 router.get("/my-wallet", auth, async (req, res) => {
@@ -225,6 +782,12 @@ router.get("/my-wallet", auth, async (req, res) => {
         status: "INACTIVE",
       };
     }
+
+    const bankDetails = await InvestmentBankDetail.findOne({
+      where: { userId },
+    });
+
+    const minWithdrawalAmount = await getSettingNumber("INVESTMENT_MIN_WITHDRAWAL", 2500);
 
     const roiBalance = Number(investment.roiBalance || 0);
     const commissionBalance = Number(investment.commissionBalance || 0);
@@ -253,15 +816,340 @@ router.get("/my-wallet", auth, async (req, res) => {
         commissionBalance,
         totalWithdrawn: Number(investment.totalWithdrawn || 0),
         availableBalance,
+        minWithdrawalAmount,
         monthlyEstRoi: Number(investment.activeInvestment || 0) * 0.05,
         status: investment.status,
       },
+      hasSavedBankDetails: !!bankDetails,
+      bankDetails: bankDetails || null,
       transactions: recentTransactions,
     });
   } catch (err) {
     console.error("Get My Investment Wallet Error:", err);
     return res.status(500).json({ msg: "Failed to fetch investment wallet details", error: err.message });
   }
+});
+
+/* ======================================================================================
+   💸 INVESTMENT WITHDRAWAL WORKFLOW APIs
+====================================================================================== */
+
+/**
+ * @route   POST /api/investment/withdraw/request
+ * @desc    User submits an investment withdrawal request.
+ *          Minimum withdrawal limit is checked dynamically via Admin settings (default ₹2,500).
+ *          Automatically fetches and attaches the user's saved InvestmentBankDetail.
+ *          Deducts amount from available investment wallet balance and sets status to PENDING.
+ * @access  Authenticated User
+ */
+router.post("/withdraw/request", auth, async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const userId = req.user.id;
+    const { amount } = req.body;
+
+    const numAmount = Number(amount);
+    const MIN_WITHDRAWAL = await getSettingNumber("INVESTMENT_MIN_WITHDRAWAL", 2500);
+
+    if (!numAmount || isNaN(numAmount) || numAmount < MIN_WITHDRAWAL) {
+      await t.rollback();
+      return res.status(400).json({
+        msg: `Minimum withdrawal amount is ₹${MIN_WITHDRAWAL.toLocaleString("en-IN")}`,
+      });
+    }
+
+    // 1. Check if user has saved InvestmentBankDetail
+    const bankDetail = await InvestmentBankDetail.findOne({
+      where: { userId },
+      transaction: t,
+    });
+
+    if (!bankDetail) {
+      await t.rollback();
+      return res.status(400).json({
+        msg: "Please save your Investment Bank Details first at POST /api/investment/bank-details before requesting a withdrawal.",
+      });
+    }
+
+    let investment = await Investment.findOne({
+      where: { userId },
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+
+    if (!investment) {
+      await t.rollback();
+      return res.status(400).json({ msg: "No active investment wallet found" });
+    }
+
+    const currentRoi = Number(investment.roiBalance || 0);
+    const currentComm = Number(investment.commissionBalance || 0);
+    const totalAvailable = currentRoi + currentComm;
+
+    if (numAmount > totalAvailable) {
+      await t.rollback();
+      return res.status(400).json({
+        msg: `Insufficient available balance. Available: ₹${totalAvailable.toLocaleString("en-IN")}, Requested: ₹${numAmount.toLocaleString("en-IN")}`,
+      });
+    }
+
+    // 2. Deduct amount from balances (prioritize ROI balance then commission balance)
+    let remainingToDeduct = numAmount;
+    if (currentRoi >= remainingToDeduct) {
+      investment.roiBalance = currentRoi - remainingToDeduct;
+      remainingToDeduct = 0;
+    } else {
+      investment.roiBalance = 0;
+      remainingToDeduct -= currentRoi;
+      investment.commissionBalance = currentComm - remainingToDeduct;
+    }
+
+    await investment.save({ transaction: t });
+
+    // 3. Create InvestmentWithdrawal record with attached bank details from InvestmentBankDetail
+    const withdrawalReq = await InvestmentWithdrawal.create(
+      {
+        userId,
+        investmentId: investment.id,
+        amount: numAmount,
+        status: "PENDING",
+        bankAccountNumber: bankDetail.accountNumber,
+        ifscCode: bankDetail.ifscCode,
+        accountHolderName: bankDetail.accountHolderName,
+        bankName: bankDetail.bankName,
+      },
+      { transaction: t }
+    );
+
+    // 4. Create audit transaction log
+    await InvestmentTransaction.create(
+      {
+        userId,
+        type: "WITHDRAWAL",
+        amount: numAmount,
+        description: `Withdrawal request of ₹${numAmount.toLocaleString("en-IN")} submitted (Status: PENDING)`,
+        meta: {
+          withdrawalId: withdrawalReq.id,
+          status: "PENDING",
+          bankAccountNumber: bankDetail.accountNumber,
+          ifscCode: bankDetail.ifscCode,
+          accountHolderName: bankDetail.accountHolderName,
+        },
+      },
+      { transaction: t }
+    );
+
+    await t.commit();
+
+    return res.status(201).json({
+      success: true,
+      msg: `Withdrawal request of ₹${numAmount.toLocaleString("en-IN")} submitted successfully using your saved Investment Bank Details. Pending Admin manual payout.`,
+      withdrawal: withdrawalReq,
+      attachedBankDetails: {
+        accountNumber: bankDetail.accountNumber,
+        ifscCode: bankDetail.ifscCode,
+        accountHolderName: bankDetail.accountHolderName,
+        bankName: bankDetail.bankName,
+      },
+    });
+  } catch (err) {
+    await t.rollback();
+    console.error("Investment Withdraw Request Error:", err);
+    return res.status(500).json({ msg: "Failed to submit withdrawal request", error: err.message });
+  }
+});
+
+/**
+ * @route   GET /api/investment/withdraw/my-requests
+ * @desc    Get current user's investment withdrawal history with live status updates.
+ * @access  Authenticated User
+ */
+router.get("/withdraw/my-requests", auth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const withdrawals = await InvestmentWithdrawal.findAll({
+      where: { userId },
+      order: [["createdAt", "DESC"]],
+    });
+
+    return res.status(200).json({
+      success: true,
+      count: withdrawals.length,
+      withdrawals,
+    });
+  } catch (err) {
+    console.error("Get My Withdrawals Error:", err);
+    return res.status(500).json({ msg: "Failed to fetch withdrawal requests", error: err.message });
+  }
+});
+
+/**
+ * @route   GET /api/investment/admin/withdrawals
+ * @desc    Admin lists all investment withdrawal requests with optional status filter (PENDING, APPROVED, REJECTED, ALL).
+ * @access  Admin / Master / Staff
+ */
+router.get("/admin/withdrawals", auth, isAdmin, async (req, res) => {
+  try {
+    const { status } = req.query;
+
+    let whereClause = {};
+    if (status && ["PENDING", "APPROVED", "REJECTED"].includes(status.toUpperCase())) {
+      whereClause.status = status.toUpperCase();
+    }
+
+    const withdrawals = await InvestmentWithdrawal.findAll({
+      where: whereClause,
+      include: [
+        {
+          model: User,
+          attributes: ["id", "name", "userID", "email", "phone"],
+        },
+      ],
+      order: [["createdAt", "DESC"]],
+    });
+
+    return res.status(200).json({
+      success: true,
+      count: withdrawals.length,
+      withdrawals,
+    });
+  } catch (err) {
+    console.error("Admin Get Withdrawals Error:", err);
+    return res.status(500).json({ msg: "Failed to fetch withdrawal requests", error: err.message });
+  }
+});
+
+/**
+ * @route   PUT /api/investment/admin/withdrawals/:id/process
+ * @desc    Admin processes a withdrawal request: APPROVE (with UTR reference) or REJECT (refunds balance).
+ * @access  Admin / Master / Staff
+ */
+router.post("/admin/withdrawals/:id/process", auth, isAdmin, async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const withdrawalId = req.params.id;
+    const { action, utrNumber, adminRemark } = req.body;
+
+    if (!action || !["APPROVE", "REJECT"].includes(action.toUpperCase())) {
+      await t.rollback();
+      return res.status(400).json({ msg: "Action must be APPROVE or REJECT" });
+    }
+
+    const withdrawal = await InvestmentWithdrawal.findByPk(withdrawalId, {
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+
+    if (!withdrawal) {
+      await t.rollback();
+      return res.status(404).json({ msg: "Withdrawal request not found" });
+    }
+
+    if (withdrawal.status !== "PENDING") {
+      await t.rollback();
+      return res.status(400).json({
+        msg: `Withdrawal request has already been processed with status: ${withdrawal.status}`,
+      });
+    }
+
+    const isApprove = action.toUpperCase() === "APPROVE";
+    const numAmount = Number(withdrawal.amount);
+
+    if (isApprove) {
+      withdrawal.status = "APPROVED";
+      withdrawal.utrNumber = utrNumber || `UTR-${Date.now()}`;
+      withdrawal.adminRemark = adminRemark || "Payout sent manually by Admin";
+      withdrawal.processedByAdminId = req.user.id;
+      withdrawal.processedAt = new Date();
+      await withdrawal.save({ transaction: t });
+
+      // Update totalWithdrawn in Investment wallet
+      let investment = await Investment.findOne({
+        where: { userId: withdrawal.userId },
+        transaction: t,
+        lock: t.LOCK.UPDATE,
+      });
+
+      if (investment) {
+        investment.totalWithdrawn = Number(investment.totalWithdrawn || 0) + numAmount;
+        await investment.save({ transaction: t });
+      }
+
+      // Log successful transaction
+      await InvestmentTransaction.create(
+        {
+          userId: withdrawal.userId,
+          type: "WITHDRAWAL",
+          amount: numAmount,
+          createdAdminId: req.user.id,
+          description: `Withdrawal of ₹${numAmount.toLocaleString("en-IN")} PAID/APPROVED (UTR: ${withdrawal.utrNumber})`,
+          meta: {
+            withdrawalId: withdrawal.id,
+            status: "APPROVED",
+            utrNumber: withdrawal.utrNumber,
+            adminRemark: withdrawal.adminRemark,
+          },
+        },
+        { transaction: t }
+      );
+    } else {
+      // REJECT: Refund money back to user's investment wallet
+      withdrawal.status = "REJECTED";
+      withdrawal.adminRemark = adminRemark || "Withdrawal request rejected by Admin";
+      withdrawal.processedByAdminId = req.user.id;
+      withdrawal.processedAt = new Date();
+      await withdrawal.save({ transaction: t });
+
+      let investment = await Investment.findOne({
+        where: { userId: withdrawal.userId },
+        transaction: t,
+        lock: t.LOCK.UPDATE,
+      });
+
+      if (investment) {
+        investment.roiBalance = Number(investment.roiBalance || 0) + numAmount;
+        await investment.save({ transaction: t });
+      }
+
+      // Log refund transaction
+      await InvestmentTransaction.create(
+        {
+          userId: withdrawal.userId,
+          type: "WITHDRAWAL",
+          amount: numAmount,
+          createdAdminId: req.user.id,
+          description: `Withdrawal request of ₹${numAmount.toLocaleString("en-IN")} REJECTED by Admin. Amount refunded to wallet.`,
+          meta: {
+            withdrawalId: withdrawal.id,
+            status: "REJECTED",
+            adminRemark: withdrawal.adminRemark,
+          },
+        },
+        { transaction: t }
+      );
+    }
+
+    await t.commit();
+
+    return res.status(200).json({
+      success: true,
+      msg: `Withdrawal request successfully ${isApprove ? "APPROVED" : "REJECTED"}.`,
+      withdrawal,
+    });
+  } catch (err) {
+    await t.rollback();
+    console.error("Process Withdrawal Error:", err);
+    return res.status(500).json({ msg: "Failed to process withdrawal request", error: err.message });
+  }
+});
+
+/**
+ * PUT alias for processing withdrawal
+ */
+router.put("/admin/withdrawals/:id/process", auth, isAdmin, async (req, res) => {
+  req.url = `/admin/withdrawals/${req.params.id}/process`;
+  return router.handle(req, res);
 });
 
 /**
@@ -288,6 +1176,10 @@ router.get("/admin/user-investment/:userID", auth, isAdmin, async (req, res) => 
       where: { userId: targetUser.id },
     });
 
+    const bankDetails = await InvestmentBankDetail.findOne({
+      where: { userId: targetUser.id },
+    });
+
     const transactions = await InvestmentTransaction.findAll({
       where: { userId: targetUser.id },
       include: [
@@ -300,9 +1192,15 @@ router.get("/admin/user-investment/:userID", auth, isAdmin, async (req, res) => 
       order: [["createdAt", "DESC"]],
     });
 
+    const withdrawals = await InvestmentWithdrawal.findAll({
+      where: { userId: targetUser.id },
+      order: [["createdAt", "DESC"]],
+    });
+
     return res.status(200).json({
       success: true,
       targetUser,
+      bankDetails: bankDetails || null,
       investment: investment || {
         totalInvested: 0,
         activeInvestment: 0,
@@ -311,6 +1209,7 @@ router.get("/admin/user-investment/:userID", auth, isAdmin, async (req, res) => 
         totalWithdrawn: 0,
         status: "INACTIVE",
       },
+      withdrawals,
       transactions,
     });
   } catch (err) {

@@ -62,7 +62,10 @@ const Contact = require("./models/Contact.js");
 const contactsRoutes = require("./routes/contacts.js");
 const Investment = require("./models/Investment.js");
 const InvestmentTransaction = require("./models/InvestmentTransaction.js");
+const InvestmentWithdrawal = require("./models/InvestmentWithdrawal.js");
+const InvestmentBankDetail = require("./models/InvestmentBankDetail.js");
 const investmentRoutes = require("./routes/investment.js");
+
 
 
 
@@ -111,6 +114,8 @@ app.use("/api/categories", categoryRoutes);
 app.use("/api/subcategories", subCategoryRoutes);
 app.use("/api/contacts", contactsRoutes);
 app.use("/api/investment", investmentRoutes);
+app.use("/api/investments", investmentRoutes);
+
 
 /* relations */
 Investment.belongsTo(User, { foreignKey: "userId" });
@@ -118,6 +123,12 @@ User.hasOne(Investment, { foreignKey: "userId" });
 
 InvestmentTransaction.belongsTo(User, { foreignKey: "userId" });
 InvestmentTransaction.belongsTo(User, { foreignKey: "fromUserId", as: "fromUser" });
+
+InvestmentWithdrawal.belongsTo(User, { foreignKey: "userId" });
+User.hasMany(InvestmentWithdrawal, { foreignKey: "userId" });
+
+InvestmentBankDetail.belongsTo(User, { foreignKey: "userId" });
+User.hasOne(InvestmentBankDetail, { foreignKey: "userId" });
 
 Cart.belongsTo(User, { foreignKey: "userId" });
 User.hasOne(Cart, { foreignKey: "userId" });
