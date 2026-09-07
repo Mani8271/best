@@ -1,6 +1,8 @@
 const express = require("express");
 const { sequelize } = require("../config/db.js");
 const { Op } = require("sequelize");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 const auth = require("../middleware/auth.js");
 const isAdmin = require("../middleware/isAdmin.js");
 
@@ -13,6 +15,231 @@ const AppSetting = require("../models/AppSetting.js");
 const { getSettingNumber } = require("../config/settings.js");
 
 const router = express.Router();
+
+const signToken = (id) =>
+  jwt.sign({ id }, process.env.JWT_SECRET || "default_secret_key", { expiresIn: "7d" });
+
+/**
+ * Generate unique SI-prefixed User ID / Referral Code (e.g., SI566665)
+ */
+const generateInvestmentUserID = async (t) => {
+  let isUnique = false;
+  let newID = "";
+  while (!isUnique) {
+    const num = Math.floor(100000 + Math.random() * 900000); // 6 digits
+    newID = `SI${num}`; // e.g. SI566665
+    const existingUser = await User.findOne({
+      where: {
+        [Op.or]: [{ userID: newID }, { referralCode: newID }],
+      },
+      transaction: t,
+    });
+    if (!existingUser) {
+      isUnique = true;
+    }
+  }
+  return newID;
+};
+
+/* ======================================================================================
+   🔑 DYNAMIC INVESTMENT REGISTER & LOGIN APIs
+====================================================================================== */
+
+/**
+ * @route   POST /api/investment/register
+ * @desc    Dedicated Register API for Investment Users (Generates SIxxxxxx ID e.g., SI566665).
+ * @access  Public
+ */
+router.post("/register", async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const { name, email, phone, password, referralCode } = req.body;
+
+    if (!name || !email || !phone || !password) {
+      await t.rollback();
+      return res.status(400).json({ msg: "Please enter all required fields: name, email, phone, password." });
+    }
+
+    const cleanEmail = String(email).trim().toLowerCase();
+    const cleanPhone = String(phone).trim();
+
+    // Auto-generate fresh unique SI-prefixed ID (e.g. SI566665)
+    const newSI_ID = await generateInvestmentUserID(t);
+
+    // If sponsor referralCode provided, look up sponsor
+    let sponsorId = null;
+    if (referralCode) {
+      const cleanRefCode = String(referralCode).trim();
+      const sponsorUser = await User.findOne({
+        where: {
+          [Op.or]: [{ referralCode: cleanRefCode }, { userID: cleanRefCode }],
+        },
+        transaction: t,
+      });
+
+      if (sponsorUser) {
+        sponsorId = sponsorUser.id;
+      }
+    }
+
+    // Hash password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // Always create a FRESH User record specifically for Investment
+    const user = await User.create(
+      {
+        name: String(name).trim(),
+        email: cleanEmail,
+        phone: cleanPhone,
+        password: hashedPassword,
+        userID: newSI_ID,
+        referralCode: newSI_ID, // SI ID also serves as referral code (e.g. SI566665)
+        sponsorId: sponsorId || null,
+        role: "USER",
+        status: "ACTIVE",
+      },
+      { transaction: t }
+    );
+
+    // Automatically initialize Investment record for the user
+    const [investment] = await Investment.findOrCreate({
+      where: { userId: user.id },
+      defaults: {
+        totalInvested: 0,
+        activeInvestment: 0,
+        roiBalance: 0,
+        commissionBalance: 0,
+        totalWithdrawn: 0,
+        status: "ACTIVE",
+      },
+      transaction: t,
+    });
+
+    await t.commit();
+
+    const token = signToken(user.id);
+
+    return res.status(201).json({
+      success: true,
+      msg: `User registered successfully with Investment ID: ${newSI_ID}`,
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        userID: user.userID,
+        referralCode: user.referralCode,
+        sponsorId: user.sponsorId,
+        role: user.role,
+        status: user.status,
+      },
+      investment: {
+        totalInvested: Number(investment.totalInvested || 0),
+        activeInvestment: Number(investment.activeInvestment || 0),
+        roiBalance: Number(investment.roiBalance || 0),
+        commissionBalance: Number(investment.commissionBalance || 0),
+        availableBalance: Number(investment.roiBalance || 0) + Number(investment.commissionBalance || 0),
+        status: investment.status,
+      },
+    });
+  } catch (err) {
+    await t.rollback();
+    console.error("Investment Register Error:", err);
+    return res.status(500).json({ msg: "Registration failed", error: err.message });
+  }
+});
+
+/**
+ * @route   POST /api/investment/login
+ * @desc    Dedicated Login API for Investment Users (using SIxxxxxx ID/email/phone & password).
+ * @access  Public
+ */
+router.post("/login", async (req, res) => {
+  try {
+    const { userID, email, phone, password } = req.body;
+
+    const targetLoginId = userID || email || phone;
+
+    if (!targetLoginId || !password) {
+      return res.status(400).json({ msg: "Please enter your User ID / Email / Phone and Password." });
+    }
+
+    const cleanLoginId = String(targetLoginId).trim();
+
+    // Find user by userID, referralCode, email, or phone
+    const user = await User.findOne({
+      where: {
+        [Op.or]: [
+          { userID: cleanLoginId },
+          { referralCode: cleanLoginId },
+          { email: cleanLoginId.toLowerCase() },
+          { phone: cleanLoginId },
+        ],
+      },
+    });
+
+    if (!user) {
+      return res.status(400).json({ msg: "Invalid credentials. User not found." });
+    }
+
+    // Compare password
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ msg: "Invalid credentials. Incorrect password." });
+    }
+
+    // Fetch user's Investment wallet
+    let investment = await Investment.findOne({ where: { userId: user.id } });
+    if (!investment) {
+      investment = await Investment.create({
+        userId: user.id,
+        totalInvested: 0,
+        activeInvestment: 0,
+        roiBalance: 0,
+        commissionBalance: 0,
+        totalWithdrawn: 0,
+        status: "ACTIVE",
+      });
+    }
+
+    // Fetch Bank details saved status
+    const bankDetails = await InvestmentBankDetail.findOne({ where: { userId: user.id } });
+
+    const token = signToken(user.id);
+
+    return res.status(200).json({
+      success: true,
+      msg: "Login successful",
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        userID: user.userID,
+        referralCode: user.referralCode,
+        sponsorId: user.sponsorId,
+        role: user.role,
+        status: user.status,
+      },
+      investment: {
+        totalInvested: Number(investment.totalInvested || 0),
+        activeInvestment: Number(investment.activeInvestment || 0),
+        roiBalance: Number(investment.roiBalance || 0),
+        commissionBalance: Number(investment.commissionBalance || 0),
+        totalWithdrawn: Number(investment.totalWithdrawn || 0),
+        availableBalance: Number(investment.roiBalance || 0) + Number(investment.commissionBalance || 0),
+        status: investment.status,
+      },
+      hasSavedBankDetails: !!bankDetails,
+    });
+  } catch (err) {
+    console.error("Investment Login Error:", err);
+    return res.status(500).json({ msg: "Login failed", error: err.message });
+  }
+});
 
 // Plan Configuration Rates
 const PLAN_CONFIGS = {
