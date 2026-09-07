@@ -72,7 +72,13 @@ router.post("/register", async (req, res) => {
       const cleanRefCode = String(referralCode).trim();
       const sponsorUser = await User.findOne({
         where: {
-          [Op.or]: [{ referralCode: cleanRefCode }, { userID: cleanRefCode }],
+          [Op.or]: [
+            { referralCode: cleanRefCode },
+            { userID: cleanRefCode },
+            { referralCode: cleanRefCode.toUpperCase() },
+            { userID: cleanRefCode.toUpperCase() },
+            { id: isNaN(cleanRefCode) ? 0 : Number(cleanRefCode) },
+          ],
         },
         transaction: t,
       });
@@ -549,7 +555,7 @@ router.put("/admin/settings", auth, isAdmin, async (req, res) => {
 router.post("/admin/topup", auth, isAdmin, async (req, res) => {
   const t = await sequelize.transaction();
   try {
-    const { userID, userId, amount, planType, remark, sponsorUserID, sponsorReferralCode, referralCode } = req.body;
+    const { userID, userId, amount, planType, remark } = req.body;
 
     const numAmount = Number(amount);
     const selectedPlanKey = planType && PLAN_CONFIGS[planType] ? planType : "DEFAULT_50K";
@@ -562,7 +568,7 @@ router.post("/admin/topup", auth, isAdmin, async (req, res) => {
       });
     }
 
-    // Search user by userID string (e.g. S123456) or primary key id
+    // Search user by userID string (e.g. SI566665) or primary key id
     let whereClause = {};
     if (userID) {
       whereClause = { userID: String(userID).trim() };
@@ -570,7 +576,7 @@ router.post("/admin/topup", auth, isAdmin, async (req, res) => {
       whereClause = { id: Number(userId) };
     } else {
       await t.rollback();
-      return res.status(400).json({ msg: "Please provide target user ID or userID (e.g., S123456)" });
+      return res.status(400).json({ msg: "Please provide target user ID or userID (e.g., SI566665)" });
     }
 
     const targetUser = await User.findOne({
@@ -582,25 +588,6 @@ router.post("/admin/topup", auth, isAdmin, async (req, res) => {
     if (!targetUser) {
       await t.rollback();
       return res.status(404).json({ msg: "User not found with the provided ID" });
-    }
-
-    // 0. Optional: Link Sponsor ID if sponsorUserID / referralCode passed during top-up
-    const targetSponsorCode = sponsorUserID || sponsorReferralCode || referralCode;
-    if (targetSponsorCode) {
-      const sponsorUser = await User.findOne({
-        where: {
-          [Op.or]: [
-            { userID: String(targetSponsorCode).trim() },
-            { referralCode: String(targetSponsorCode).trim() },
-          ],
-        },
-        transaction: t,
-      });
-
-      if (sponsorUser && targetUser.sponsorId !== sponsorUser.id) {
-        targetUser.sponsorId = sponsorUser.id;
-        await targetUser.save({ transaction: t });
-      }
     }
 
     // 1. Find or create Investment wallet for target user
