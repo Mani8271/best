@@ -13,6 +13,7 @@ const InvestmentWithdrawal = require("../models/InvestmentWithdrawal.js");
 const InvestmentBankDetail = require("../models/InvestmentBankDetail.js");
 const AppSetting = require("../models/AppSetting.js");
 const { getSettingNumber } = require("../config/settings.js");
+const { processDailyPayouts } = require("../utils/dailyPayoutEngine.js");
 
 const router = express.Router();
 
@@ -247,27 +248,6 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// Plan Configuration Rates
-const PLAN_CONFIGS = {
-  DEFAULT_50K: {
-    name: "Standard Investment Plan (₹50,000)",
-    minAmount: 50000,
-    monthlyRoiPercent: 5.0, // 5%
-    commissions: { 1: 0.02, 2: 0.01, 3: 0.005, 4: 0.0025 }, // 2%, 1%, 0.5%, 0.25%
-  },
-  FARMLAND_6L: {
-    name: "Farm Land Purchaser Security Plan (₹6,00,000)",
-    minAmount: 600000,
-    monthlyRoiPercent: 3.0, // 3% = ₹18,000/month
-    commissions: { 1: 0.01, 2: 0.005, 3: 0.0025, 4: 0.00125 }, // 1%, 0.5%, 0.25%, 0.125%
-  },
-  FRANCHISE_6L: {
-    name: "Franchise Growth / Pharmacy Plan (₹6,00,000)",
-    minAmount: 600000,
-    monthlyRoiFixed: 16500, // ₹16,500/month for 36 months
-    commissions: { 1: 0.01, 2: 0.005, 3: 0.0025, 4: 0.00125 }, // 1%, 0.5%, 0.25%, 0.125%
-  },
-};
 
 /**
  * Helper function to build 4-level downline tree for any root user
@@ -276,7 +256,7 @@ async function build4LevelTree(rootUserId) {
   const investmentInclude = [
     {
       model: Investment,
-      required: true, // Only return users who have an Investment account created
+      required: false, // Include all downline users even if investment wallet is not yet initialized
       attributes: ["totalInvested", "activeInvestment", "status"],
     },
   ];
@@ -453,7 +433,7 @@ router.post("/admin/settings", auth, isAdmin, async (req, res) => {
 
     const currentMinWithdrawal = await getSettingNumber("INVESTMENT_MIN_WITHDRAWAL", 2500);
     const currentRoi = await getSettingNumber("INVESTMENT_ROI_PERCENT", 5);
-    const currentL1 = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", 2);
+    const currentL1 = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", 5);
     const currentL2 = await getSettingNumber("INVESTMENT_LEVEL_2_PERCENT", 1);
     const currentL3 = await getSettingNumber("INVESTMENT_LEVEL_3_PERCENT", 0.5);
     const currentL4 = await getSettingNumber("INVESTMENT_LEVEL_4_PERCENT", 0.25);
@@ -518,7 +498,7 @@ router.put("/admin/settings", auth, isAdmin, async (req, res) => {
 
     const currentMinWithdrawal = await getSettingNumber("INVESTMENT_MIN_WITHDRAWAL", 2500);
     const currentRoi = await getSettingNumber("INVESTMENT_ROI_PERCENT", 5);
-    const currentL1 = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", 2);
+    const currentL1 = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", 5);
     const currentL2 = await getSettingNumber("INVESTMENT_LEVEL_2_PERCENT", 1);
     const currentL3 = await getSettingNumber("INVESTMENT_LEVEL_3_PERCENT", 0.5);
     const currentL4 = await getSettingNumber("INVESTMENT_LEVEL_4_PERCENT", 0.25);
@@ -547,24 +527,20 @@ router.put("/admin/settings", auth, isAdmin, async (req, res) => {
 /**
  * @route   POST /api/investment/admin/topup
  * @desc    Admin loads investment money into a user's Investment Wallet by userID.
- *          Supports optional sponsorUserID / referralCode to link sponsor at top-up time.
- *          Supports optional planType (DEFAULT_50K, FARMLAND_6L, FRANCHISE_6L).
  *          Automatically distributes 4-Level commissions to upline sponsors.
  * @access  Admin / Master / Staff
  */
 router.post("/admin/topup", auth, isAdmin, async (req, res) => {
   const t = await sequelize.transaction();
   try {
-    const { userID, userId, amount, planType, remark } = req.body;
+    const { userID, userId, amount, remark } = req.body;
 
     const numAmount = Number(amount);
-    const selectedPlanKey = planType && PLAN_CONFIGS[planType] ? planType : "DEFAULT_50K";
-    const planConfig = PLAN_CONFIGS[selectedPlanKey];
 
-    if (!numAmount || isNaN(numAmount) || numAmount < planConfig.minAmount) {
+    if (!numAmount || isNaN(numAmount) || numAmount <= 0) {
       await t.rollback();
       return res.status(400).json({
-        msg: `Minimum investment amount for ${planConfig.name} is ₹${planConfig.minAmount.toLocaleString("en-IN")}`,
+        msg: "Please enter a valid investment amount greater than 0.",
       });
     }
 
@@ -617,112 +593,85 @@ router.post("/admin/topup", auth, isAdmin, async (req, res) => {
         type: "DEPOSIT",
         amount: numAmount,
         createdAdminId: req.user.id,
-        description: remark || `Investment deposit of ₹${numAmount.toLocaleString("en-IN")} [${planConfig.name}] added by Admin`,
+        description: remark || `Investment deposit of ₹${numAmount.toLocaleString("en-IN")} added by Admin`,
         meta: {
           adminId: req.user.id,
           adminName: req.user.name || "Admin",
-          planType: selectedPlanKey,
-          planName: planConfig.name,
           remark: remark || null,
         },
       },
       { transaction: t }
     );
 
-    // 3. Traversal Upline 4-Levels for Commission Distribution
+    // 3. Direct Sponsor 5% Commission Distribution (Level 1 Only)
     const commissionsDistributed = [];
-    let currentUserId = targetUser.id;
 
-    const level1Pct = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", (planConfig.commissions[1] || 0.02) * 100);
-    const level2Pct = await getSettingNumber("INVESTMENT_LEVEL_2_PERCENT", (planConfig.commissions[2] || 0.01) * 100);
-    const level3Pct = await getSettingNumber("INVESTMENT_LEVEL_3_PERCENT", (planConfig.commissions[3] || 0.005) * 100);
-    const level4Pct = await getSettingNumber("INVESTMENT_LEVEL_4_PERCENT", (planConfig.commissions[4] || 0.0025) * 100);
+    if (targetUser.sponsorId) {
+      const level1Pct = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", 5);
+      const rate = level1Pct / 100;
 
-    const rates = {
-      1: level1Pct / 100,
-      2: level2Pct / 100,
-      3: level3Pct / 100,
-      4: level4Pct / 100,
-    };
-
-    for (let level = 1; level <= 4; level++) {
-      const currentUserNode = await User.findByPk(currentUserId, {
-        attributes: ["id", "sponsorId", "name", "userID"],
-        transaction: t,
-      });
-
-      if (!currentUserNode || !currentUserNode.sponsorId) {
-        break; // Reached top of tree
-      }
-
-      const sponsor = await User.findByPk(currentUserNode.sponsorId, {
-        transaction: t,
-        lock: t.LOCK.UPDATE,
-      });
-
-      if (!sponsor) {
-        break;
-      }
-
-      const rate = rates[level] || 0;
       if (rate > 0) {
-        const commAmount = Number((numAmount * rate).toFixed(2));
-
-        let [sponsorInvestment] = await Investment.findOrCreate({
-          where: { userId: sponsor.id },
-          defaults: {
-            totalInvested: 0,
-            activeInvestment: 0,
-            roiBalance: 0,
-            commissionBalance: 0,
-            totalWithdrawn: 0,
-            status: "ACTIVE",
-          },
+        const sponsor = await User.findByPk(targetUser.sponsorId, {
           transaction: t,
           lock: t.LOCK.UPDATE,
         });
 
-        sponsorInvestment.commissionBalance = Number(sponsorInvestment.commissionBalance || 0) + commAmount;
-        await sponsorInvestment.save({ transaction: t });
+        if (sponsor) {
+          const commAmount = Number((numAmount * rate).toFixed(2));
 
-        await InvestmentTransaction.create(
-          {
-            userId: sponsor.id,
-            type: "LEVEL_COMMISSION",
-            amount: commAmount,
-            level,
-            fromUserId: targetUser.id,
-            createdAdminId: req.user.id,
-            description: `Level ${level} Commission (${(rate * 100).toFixed(3)}%) from ${targetUser.name} (${targetUser.userID}) investment of ₹${numAmount.toLocaleString("en-IN")}`,
-            meta: {
-              level,
-              ratePercentage: rate * 100,
-              investmentAmount: numAmount,
-              planType: selectedPlanKey,
-              investorUserId: targetUser.userID,
-              investorName: targetUser.name,
+          let [sponsorInvestment] = await Investment.findOrCreate({
+            where: { userId: sponsor.id },
+            defaults: {
+              totalInvested: 0,
+              activeInvestment: 0,
+              roiBalance: 0,
+              commissionBalance: 0,
+              totalWithdrawn: 0,
+              status: "ACTIVE",
             },
-          },
-          { transaction: t }
-        );
+            transaction: t,
+            lock: t.LOCK.UPDATE,
+          });
 
-        commissionsDistributed.push({
-          level,
-          sponsorId: sponsor.id,
-          sponsorUserID: sponsor.userID,
-          sponsorName: sponsor.name,
-          commissionAmount: commAmount,
-        });
+          sponsorInvestment.commissionBalance = Number(sponsorInvestment.commissionBalance || 0) + commAmount;
+          await sponsorInvestment.save({ transaction: t });
+
+          await InvestmentTransaction.create(
+            {
+              userId: sponsor.id,
+              type: "LEVEL_COMMISSION",
+              amount: commAmount,
+              level: 1,
+              fromUserId: targetUser.id,
+              createdAdminId: req.user.id,
+              description: `Direct Referral Commission (${rate * 100}%) from ${targetUser.name} (${targetUser.userID}) investment of ₹${numAmount.toLocaleString("en-IN")}`,
+              meta: {
+                level: 1,
+                ratePercentage: rate * 100,
+                investmentAmount: numAmount,
+                investorUserId: targetUser.userID,
+                investorName: targetUser.name,
+              },
+            },
+            { transaction: t }
+          );
+
+          commissionsDistributed.push({
+            level: 1,
+            sponsorId: sponsor.id,
+            sponsorUserID: sponsor.userID,
+            sponsorName: sponsor.name,
+            commissionAmount: commAmount,
+          });
+        }
       }
-
-      currentUserId = sponsor.id;
     }
 
     await t.commit();
 
     return res.status(200).json({
       success: true,
-      msg: `Investment of ₹${numAmount.toLocaleString("en-IN")} (${planConfig.name}) successfully added for user ${targetUser.name} (${targetUser.userID})`,
+      msg: `Investment of ₹${numAmount.toLocaleString("en-IN")} successfully added for user ${targetUser.name} (${targetUser.userID})`,
       data: {
         targetUser: {
           id: targetUser.id,
@@ -1457,6 +1406,25 @@ router.get("/admin/all-investments", auth, isAdmin, async (req, res) => {
   } catch (err) {
     console.error("Admin Get All Investments Error:", err);
     return res.status(500).json({ msg: "Failed to fetch all investments", error: err.message });
+  }
+});
+
+/**
+ * @route   POST /api/investment/admin/trigger-daily-payout
+ * @desc    Manually trigger Daily ROI and Daily Level Commission payouts for today.
+ * @access  Admin / Master / Staff
+ */
+router.post("/admin/trigger-daily-payout", auth, isAdmin, async (req, res) => {
+  try {
+    const result = await processDailyPayouts();
+    return res.status(200).json({
+      success: true,
+      msg: `Daily ROI & Level Commissions processing completed for ${result.date}`,
+      summary: result,
+    });
+  } catch (err) {
+    console.error("Admin Trigger Daily Payout Error:", err);
+    return res.status(500).json({ msg: "Failed to process daily payout", error: err.message });
   }
 });
 

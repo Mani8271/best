@@ -39,6 +39,10 @@ const Investment = sequelize.define(
       allowNull: false,
       defaultValue: "ACTIVE",
     },
+    lastRoiDate: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+    },
   },
   {
     timestamps: true,

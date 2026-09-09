@@ -209,6 +209,20 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
     await sequelize.sync(); // ✅ creates new tables / adds columns safely
     console.log("✅ MySQL synced");
 
+    // Schedule Daily ROI & Daily Level Commission cron job (runs every day at Midnight 00:00 AM)
+    const cron = require("node-cron");
+    const { processDailyPayouts } = require("./utils/dailyPayoutEngine.js");
+
+    cron.schedule("0 0 * * *", async () => {
+      console.log("⏰ [Cron] Triggering Daily ROI & Level Payouts...");
+      try {
+        await processDailyPayouts();
+      } catch (err) {
+        console.error("❌ [Cron] Error running daily payouts:", err);
+      }
+    });
+    console.log("⏰ Daily Payout Cron Job Scheduled (Runs at 00:00 Midnight daily)");
+
     app.listen(3000, () => console.log("Server running on 3000"));
   } catch (err) {
     console.error("❌ DB ERROR:", err);
