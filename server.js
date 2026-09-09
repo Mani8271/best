@@ -206,8 +206,8 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
     await sequelize.authenticate();
     console.log("✅ MySQL authenticated");
 
-    await sequelize.sync(); // ✅ creates new tables / adds columns safely
-    console.log("✅ MySQL synced");
+    await sequelize.sync({ alter: true }); // ✅ creates new tables & auto-syncs new columns safely
+    console.log("✅ MySQL synced (alter mode)");
 
     // Schedule Daily ROI & Daily Level Commission cron job (runs every day at Midnight 00:00 AM)
     const cron = require("node-cron");
