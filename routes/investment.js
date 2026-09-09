@@ -12,7 +12,7 @@ const InvestmentTransaction = require("../models/InvestmentTransaction.js");
 const InvestmentWithdrawal = require("../models/InvestmentWithdrawal.js");
 const InvestmentBankDetail = require("../models/InvestmentBankDetail.js");
 const AppSetting = require("../models/AppSetting.js");
-const { getSettingNumber } = require("../config/settings.js");
+const { getSettingNumber, getSettingString, updateAppSettingString } = require("../config/settings.js");
 const { processDailyPayouts } = require("../utils/dailyPayoutEngine.js");
 
 const router = express.Router();
@@ -104,6 +104,7 @@ router.post("/register", async (req, res) => {
         referralCode: newSI_ID, // SI ID also serves as referral code (e.g. SI566665)
         sponsorId: sponsorId || null,
         role: "USER",
+        userType: "INVESTMENT_USER",
         status: "ACTIVE",
       },
       { transaction: t }
@@ -140,6 +141,7 @@ router.post("/register", async (req, res) => {
         referralCode: user.referralCode,
         sponsorId: user.sponsorId,
         role: user.role,
+        userType: user.userType,
         status: user.status,
       },
       investment: {
@@ -229,6 +231,7 @@ router.post("/login", async (req, res) => {
         referralCode: user.referralCode,
         sponsorId: user.sponsorId,
         role: user.role,
+        userType: user.userType,
         status: user.status,
       },
       investment: {
@@ -969,6 +972,8 @@ router.get("/my-wallet", auth, async (req, res) => {
       limit: 30,
     });
 
+    const withdrawalWindow = await checkWithdrawalWindow();
+
     return res.status(200).json({
       success: true,
       user,
@@ -983,6 +988,7 @@ router.get("/my-wallet", auth, async (req, res) => {
         monthlyEstRoi: Number(investment.activeInvestment || 0) * 0.05,
         status: investment.status,
       },
+      withdrawalWindow,
       hasSavedBankDetails: !!bankDetails,
       bankDetails: bankDetails || null,
       transactions: recentTransactions,
@@ -991,6 +997,139 @@ router.get("/my-wallet", auth, async (req, res) => {
     console.error("Get My Investment Wallet Error:", err);
     return res.status(500).json({ msg: "Failed to fetch investment wallet details", error: err.message });
   }
+});
+
+/* ======================================================================================
+   🗓️ INVESTMENT WITHDRAWAL DATES / WINDOW CONFIGURATION APIs
+====================================================================================== */
+
+/**
+ * Helper function to check if withdrawal window is open today
+ */
+async function checkWithdrawalWindow() {
+  const startDateStr = await getSettingString("INVESTMENT_WITHDRAWAL_START_DATE", "");
+  const endDateStr = await getSettingString("INVESTMENT_WITHDRAWAL_END_DATE", "");
+  const enabledStr = await getSettingString("INVESTMENT_WITHDRAWAL_ENABLED", "true");
+
+  const isEnabled = enabledStr.toLowerCase() !== "false";
+
+  if (!isEnabled) {
+    return {
+      isAllowedNow: false,
+      isEnabled: false,
+      startDate: startDateStr || null,
+      endDate: endDateStr || null,
+      message: "Withdrawal requests are currently disabled by Admin.",
+    };
+  }
+
+  if (!startDateStr || !endDateStr) {
+    return {
+      isAllowedNow: true,
+      isEnabled: true,
+      startDate: startDateStr || null,
+      endDate: endDateStr || null,
+      message: "Withdrawals are open.",
+    };
+  }
+
+  const today = new Date();
+  const todayStr = today.toISOString().split("T")[0]; // YYYY-MM-DD
+  const todayDay = today.getDate(); // 1 to 31
+
+  let isAllowedNow = false;
+
+  // Check if dates are formatted as YYYY-MM-DD (e.g. 2026-09-10 to 2026-09-15)
+  if (startDateStr.includes("-") && endDateStr.includes("-")) {
+    isAllowedNow = todayStr >= startDateStr && todayStr <= endDateStr;
+  } else {
+    // Check if dates are formatted as day numbers (e.g. "10" and "15")
+    const startDay = Number(startDateStr);
+    const endDay = Number(endDateStr);
+    if (!isNaN(startDay) && !isNaN(endDay)) {
+      if (startDay <= endDay) {
+        isAllowedNow = todayDay >= startDay && todayDay <= endDay;
+      } else {
+        isAllowedNow = todayDay >= startDay || todayDay <= endDay;
+      }
+    } else {
+      isAllowedNow = true;
+    }
+  }
+
+  return {
+    isAllowedNow,
+    isEnabled: true,
+    date1: startDateStr,
+    date2: endDateStr,
+    startDate: startDateStr,
+    endDate: endDateStr,
+    message: isAllowedNow
+      ? `Withdrawals are open from ${startDateStr} to ${endDateStr}.`
+      : `Withdrawals are currently closed. Allowed withdrawal window is from ${startDateStr} to ${endDateStr}.`,
+  };
+}
+
+/**
+ * @route   GET /api/investment/withdrawal-window
+ * @desc    Get current withdrawal window dates configuration and live open/closed status.
+ * @access  Authenticated User / Admin
+ */
+router.get("/withdrawal-window", auth, async (req, res) => {
+  try {
+    const windowInfo = await checkWithdrawalWindow();
+    return res.status(200).json({
+      success: true,
+      withdrawalWindow: windowInfo,
+    });
+  } catch (err) {
+    console.error("Get Withdrawal Window Error:", err);
+    return res.status(500).json({ msg: "Failed to fetch withdrawal window dates", error: err.message });
+  }
+});
+
+/**
+ * @route   POST /api/investment/admin/withdrawal-window
+ * @desc    Admin sets 2 withdrawal dates (date1 and date2) and optionally enables/disables withdrawals.
+ *          Payload body: { date1: "2026-09-10", date2: "2026-09-15" } or day of month numbers: { date1: "10", date2: "15" }.
+ * @access  Admin / Master / Staff
+ */
+router.post("/admin/withdrawal-window", auth, isAdmin, async (req, res) => {
+  try {
+    const { date1, date2, startDate, endDate, isEnabled } = req.body;
+
+    const targetDate1 = date1 !== undefined ? date1 : startDate;
+    const targetDate2 = date2 !== undefined ? date2 : endDate;
+
+    if (targetDate1 !== undefined) {
+      await updateAppSettingString("INVESTMENT_WITHDRAWAL_START_DATE", targetDate1);
+    }
+    if (targetDate2 !== undefined) {
+      await updateAppSettingString("INVESTMENT_WITHDRAWAL_END_DATE", targetDate2);
+    }
+    if (isEnabled !== undefined) {
+      await updateAppSettingString("INVESTMENT_WITHDRAWAL_ENABLED", isEnabled ? "true" : "false");
+    }
+
+    const windowInfo = await checkWithdrawalWindow();
+
+    return res.status(200).json({
+      success: true,
+      msg: "Withdrawal window dates updated successfully",
+      withdrawalWindow: windowInfo,
+    });
+  } catch (err) {
+    console.error("Update Admin Withdrawal Window Error:", err);
+    return res.status(500).json({ msg: "Failed to update withdrawal window dates", error: err.message });
+  }
+});
+
+/**
+ * PUT alias for updating withdrawal window
+ */
+router.put("/admin/withdrawal-window", auth, isAdmin, async (req, res) => {
+  req.url = "/admin/withdrawal-window";
+  return router.handle(req, res);
 });
 
 /* ======================================================================================
@@ -1010,6 +1149,16 @@ router.post("/withdraw/request", auth, async (req, res) => {
   try {
     const userId = req.user.id;
     const { amount } = req.body;
+
+    // 0. Check withdrawal window dates
+    const windowCheck = await checkWithdrawalWindow();
+    if (!windowCheck.isAllowedNow) {
+      await t.rollback();
+      return res.status(400).json({
+        msg: windowCheck.message,
+        withdrawalWindow: windowCheck,
+      });
+    }
 
     const numAmount = Number(amount);
     const MIN_WITHDRAWAL = await getSettingNumber("INVESTMENT_MIN_WITHDRAWAL", 2500);
