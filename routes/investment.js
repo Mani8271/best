@@ -353,7 +353,7 @@ router.get("/admin/settings", auth, isAdmin, async (req, res) => {
   try {
     const minWithdrawalAmount = await getSettingNumber("INVESTMENT_MIN_WITHDRAWAL", 2500);
     const roiPercent = await getSettingNumber("INVESTMENT_ROI_PERCENT", 5);
-    const level1Percent = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", 2);
+    const level1Percent = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", 5);
     const level2Percent = await getSettingNumber("INVESTMENT_LEVEL_2_PERCENT", 1);
     const level3Percent = await getSettingNumber("INVESTMENT_LEVEL_3_PERCENT", 0.5);
     const level4Percent = await getSettingNumber("INVESTMENT_LEVEL_4_PERCENT", 0.25);
@@ -1149,16 +1149,6 @@ router.post("/withdraw/request", auth, async (req, res) => {
   try {
     const userId = req.user.id;
     const { amount } = req.body;
-
-    // 0. Check withdrawal window dates
-    const windowCheck = await checkWithdrawalWindow();
-    if (!windowCheck.isAllowedNow) {
-      await t.rollback();
-      return res.status(400).json({
-        msg: windowCheck.message,
-        withdrawalWindow: windowCheck,
-      });
-    }
 
     const numAmount = Number(amount);
     const MIN_WITHDRAWAL = await getSettingNumber("INVESTMENT_MIN_WITHDRAWAL", 2500);
