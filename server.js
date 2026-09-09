@@ -209,6 +209,29 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
     await sequelize.sync({ alter: true }); // ✅ creates new tables & auto-syncs new columns safely
     console.log("✅ MySQL synced (alter mode)");
 
+    // Auto-fix Txn #8 if recorded as 2% (₹1,000) instead of 5% (₹2,500) on live DB
+    try {
+      const [fixedTxn] = await sequelize.query(`
+        UPDATE InvestmentTransactions 
+        SET amount = 2500.00, 
+            description = 'Direct Referral Commission (5%) from john2 (SI146320) investment of ₹50,000'
+        WHERE (id = 8 OR description LIKE '%SI146320%' OR description LIKE '%john2%') AND amount < 2500;
+      `);
+      if (fixedTxn && fixedTxn.affectedRows > 0) {
+        console.log("✅ Fixed Txn #8 commission to ₹2,500 (5%)");
+        await sequelize.query(`
+          UPDATE Investments 
+          SET commissionBalance = commissionBalance + 1500.00
+          WHERE userId = (
+            SELECT id FROM Users WHERE userID = 'SI754188' OR email = 'john@gmail.com' LIMIT 1
+          );
+        `);
+        console.log("✅ Added +₹1,500 difference to John's wallet commissionBalance");
+      }
+    } catch (migErr) {
+      console.error("Txn #8 Migration fix error (non-fatal):", migErr.message);
+    }
+
     // Schedule Daily ROI & Daily Level Commission cron job (runs every day at Midnight 00:00 AM)
     const cron = require("node-cron");
     const { processDailyPayouts } = require("./utils/dailyPayoutEngine.js");
