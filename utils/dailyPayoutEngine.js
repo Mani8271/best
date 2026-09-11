@@ -132,7 +132,9 @@ async function processDailyPayouts(batchSize = 500) {
 
           const rate = rates[level] || 0;
           if (rate > 0) {
-            const commAmount = Number((dailyRoi * rate).toFixed(2));
+            // Daily Level Commission = (Active Investment * Monthly Rate) / 30 days
+            // e.g. ₹50,000 * 5% / 30 = ₹83.33 per day
+            const commAmount = Number((numActive * (rate / 30)).toFixed(2));
 
             if (commAmount > 0) {
               let [sponsorInvestment] = await Investment.findOrCreate({
@@ -159,12 +161,12 @@ async function processDailyPayouts(batchSize = 500) {
                   amount: commAmount,
                   level,
                   fromUserId: investment.userId,
-                  description: `Level ${level} Daily Commission (${rate * 100}%) from investor Daily ROI of ₹${dailyRoi.toLocaleString("en-IN")}`,
+                  description: `Level ${level} Daily Commission (${(rate * 100).toFixed(2)}% monthly) from ${currentUserNode.name} (${currentUserNode.userID}) active investment of ₹${numActive.toLocaleString("en-IN")}`,
                   meta: {
                     date: todayStr,
                     level,
                     ratePercentage: rate * 100,
-                    investorDailyRoi: dailyRoi,
+                    investorActiveInvestment: numActive,
                     investorUserId: currentUserNode.userID,
                     investorName: currentUserNode.name,
                   },
