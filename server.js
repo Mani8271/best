@@ -257,8 +257,8 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
       const [fixedDailyTxns] = await sequelize.query(`
         UPDATE InvestmentTransactions 
         SET amount = 83.33, 
-            description = REPLACE(REPLACE(description, '₹1.67', '₹83.33'), '2%', '5%')
-        WHERE type = 'DAILY_LEVEL_COMMISSION' AND level = 1 AND amount = 1.67;
+            description = REPLACE(REPLACE(description, '1.67', '83.33'), '(2%)', '(5%)')
+        WHERE description LIKE '%Level 1 Daily Commission%' AND amount < 50;
       `);
       if (fixedDailyTxns && fixedDailyTxns.affectedRows > 0) {
         const count = fixedDailyTxns.affectedRows;
