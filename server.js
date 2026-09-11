@@ -272,6 +272,26 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
         `);
         console.log(`✅ Credited +₹${count * 81.66} difference to John's wallet commissionBalance`);
       }
+
+      // Auto-fix past Daily Level 2 Commission transactions from ₹0.83 to ₹16.67
+      const [fixedDailyL2Txns] = await sequelize.query(`
+        UPDATE InvestmentTransactions 
+        SET amount = 16.67, 
+            description = REPLACE(description, '0.83', '16.67')
+        WHERE description LIKE '%Level 2 Daily Commission%' AND amount < 10;
+      `);
+      if (fixedDailyL2Txns && fixedDailyL2Txns.affectedRows > 0) {
+        const count = fixedDailyL2Txns.affectedRows;
+        console.log(`✅ Fixed ${count} past Daily Level 2 transactions from ₹0.83 to ₹16.67`);
+        await sequelize.query(`
+          UPDATE Investments 
+          SET commissionBalance = commissionBalance + (${count} * 15.84)
+          WHERE userId = (
+            SELECT id FROM Users WHERE userID = 'SI754188' OR email = 'john@gmail.com' LIMIT 1
+          );
+        `);
+        console.log(`✅ Credited +₹${count * 15.84} difference to John's wallet commissionBalance`);
+      }
     } catch (migErr) {
       console.error("Migration fix error (non-fatal):", migErr.message);
     }
