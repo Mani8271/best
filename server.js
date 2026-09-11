@@ -209,15 +209,22 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
     await sequelize.sync({ alter: true }); // ✅ creates new tables & auto-syncs new columns safely
     console.log("✅ MySQL synced (alter mode)");
 
-    // Auto-fix Txn #8 if recorded as 2% (₹1,000) instead of 5% (₹2,500) on live DB
+    // Auto-fix any 2% Direct Referral Commission transactions (Txn #8 & #12) to 5% (₹2,500) on live DB
     try {
-      const [fixedTxn] = await sequelize.query(`
+      await sequelize.query(`
+        INSERT INTO AppSettings (\`key\`, \`value\`, createdAt, updatedAt) 
+        VALUES ('INVESTMENT_LEVEL_1_PERCENT', '5', NOW(), NOW())
+        ON DUPLICATE KEY UPDATE \`value\` = '5', updatedAt = NOW();
+      `);
+
+      // Fix Txn #8 (john2)
+      const [fixedTxn8] = await sequelize.query(`
         UPDATE InvestmentTransactions 
         SET amount = 2500.00, 
             description = 'Direct Referral Commission (5%) from john2 (SI146320) investment of ₹50,000'
         WHERE (id = 8 OR description LIKE '%SI146320%' OR description LIKE '%john2%') AND amount < 2500;
       `);
-      if (fixedTxn && fixedTxn.affectedRows > 0) {
+      if (fixedTxn8 && fixedTxn8.affectedRows > 0) {
         console.log("✅ Fixed Txn #8 commission to ₹2,500 (5%)");
         await sequelize.query(`
           UPDATE Investments 
@@ -226,10 +233,27 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
             SELECT id FROM Users WHERE userID = 'SI754188' OR email = 'john@gmail.com' LIMIT 1
           );
         `);
-        console.log("✅ Added +₹1,500 difference to John's wallet commissionBalance");
+      }
+
+      // Fix Txn #12 (johnkingagain)
+      const [fixedTxn12] = await sequelize.query(`
+        UPDATE InvestmentTransactions 
+        SET amount = 2500.00, 
+            description = 'Direct Referral Commission (5%) from johnkingagain (SI390236) investment of ₹50,000'
+        WHERE (id = 12 OR description LIKE '%SI390236%' OR description LIKE '%johnkingagain%') AND amount < 2500;
+      `);
+      if (fixedTxn12 && fixedTxn12.affectedRows > 0) {
+        console.log("✅ Fixed Txn #12 commission to ₹2,500 (5%)");
+        await sequelize.query(`
+          UPDATE Investments 
+          SET commissionBalance = commissionBalance + 1500.00
+          WHERE userId = (
+            SELECT id FROM Users WHERE userID = 'SI754188' OR email = 'john@gmail.com' LIMIT 1
+          );
+        `);
       }
     } catch (migErr) {
-      console.error("Txn #8 Migration fix error (non-fatal):", migErr.message);
+      console.error("Migration fix error (non-fatal):", migErr.message);
     }
 
     // Schedule Daily ROI & Daily Level Commission cron job (runs every day at Midnight 00:00 AM)
