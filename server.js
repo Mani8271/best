@@ -296,19 +296,28 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
       console.error("Migration fix error (non-fatal):", migErr.message);
     }
 
-    // Schedule Daily ROI & Daily Level Commission cron job (runs every day at Midnight 00:00 AM)
+    // Schedule Daily ROI & Daily Level Commission cron job (runs every day at Midnight 00:00 AM IST)
     const cron = require("node-cron");
     const { processDailyPayouts } = require("./utils/dailyPayoutEngine.js");
 
-    cron.schedule("0 0 * * *", async () => {
-      console.log("⏰ [Cron] Triggering Daily ROI & Level Payouts...");
-      try {
-        await processDailyPayouts();
-      } catch (err) {
-        console.error("❌ [Cron] Error running daily payouts:", err);
-      }
+    cron.schedule(
+      "0 0 * * *",
+      async () => {
+        console.log("⏰ [Cron] Triggering Daily ROI & Level Payouts (Asia/Kolkata)...");
+        try {
+          await processDailyPayouts();
+        } catch (err) {
+          console.error("❌ [Cron] Error running daily payouts:", err);
+        }
+      },
+      { timezone: "Asia/Kolkata" }
+    );
+    console.log("⏰ Daily Payout Cron Job Scheduled (Runs at 00:00 Midnight IST daily)");
+
+    // Run Daily Payout Check on server startup (processes today's payout if not already done)
+    processDailyPayouts().catch((err) => {
+      console.error("❌ [Startup Payout Check Error]:", err.message);
     });
-    console.log("⏰ Daily Payout Cron Job Scheduled (Runs at 00:00 Midnight daily)");
 
     app.listen(3000, () => console.log("Server running on 3000"));
   } catch (err) {

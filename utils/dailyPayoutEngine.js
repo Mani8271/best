@@ -16,7 +16,8 @@ const sleep = (ms = 10) => new Promise((resolve) => setTimeout(resolve, ms));
  * Supports scaling up to Millions of Users using Cursor Batching and Event Loop Micro-pauses.
  */
 async function processDailyPayouts(batchSize = 500) {
-  const todayStr = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+  // Get YYYY-MM-DD in Indian Standard Time (Asia/Kolkata)
+  const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
   console.log(`[DailyPayoutEngine] 🚀 Starting Chunked Daily ROI Processing for date: ${todayStr} (Batch Size: ${batchSize})`);
 
   // Fetch dynamic settings
