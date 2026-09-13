@@ -209,8 +209,9 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
     await sequelize.sync({ alter: true }); // ✅ creates new tables & auto-syncs new columns safely
     console.log("✅ MySQL synced (alter mode)");
 
-    // Auto-fix any 2% Direct Referral Commission transactions (Txn #8 & #12) to 5% (₹2,500) on live DB
+    // Auto-fix & DB Sync on server startup
     try {
+      // 1. Ensure dynamic AppSettings values are set in DB
       await sequelize.query(`
         INSERT INTO AppSettings (\`key\`, \`value\`, createdAt, updatedAt) 
         VALUES 
@@ -222,81 +223,32 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
         ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`), updatedAt = NOW();
       `);
 
-      // Fix Txn #8 (john2)
-      const [fixedTxn8] = await sequelize.query(`
-        UPDATE InvestmentTransactions 
-        SET amount = 2500.00, 
-            description = 'Direct Referral Commission (5%) from john2 (SI146320) investment of ₹50,000'
-        WHERE (id = 8 OR description LIKE '%SI146320%' OR description LIKE '%john2%') AND amount < 2500;
-      `);
-      if (fixedTxn8 && fixedTxn8.affectedRows > 0) {
-        console.log("✅ Fixed Txn #8 commission to ₹2,500 (5%)");
-        await sequelize.query(`
-          UPDATE Investments 
-          SET commissionBalance = commissionBalance + 1500.00
-          WHERE userId = (
-            SELECT id FROM Users WHERE userID = 'SI754188' OR email = 'john@gmail.com' LIMIT 1
-          );
-        `);
-      }
+      // 2. Remove duplicate transaction #103 if present
+      await sequelize.query(`
+        DELETE FROM InvestmentTransactions WHERE id = 103;
+      `).catch(() => {});
 
-      // Fix Txn #12 (johnkingagain)
-      const [fixedTxn12] = await sequelize.query(`
+      // 3. Correct past Daily Level 1 Commission transactions to ₹33.33 (2.00% monthly)
+      await sequelize.query(`
         UPDATE InvestmentTransactions 
-        SET amount = 2500.00, 
-            description = 'Direct Referral Commission (5%) from johnkingagain (SI390236) investment of ₹50,000'
-        WHERE (id = 12 OR description LIKE '%SI390236%' OR description LIKE '%johnkingagain%') AND amount < 2500;
+        SET amount = 33.33, 
+            description = REPLACE(REPLACE(description, '83.33', '33.33'), '5.00%', '2.00%')
+        WHERE description LIKE '%Level 1 Daily Commission%';
       `);
-      if (fixedTxn12 && fixedTxn12.affectedRows > 0) {
-        console.log("✅ Fixed Txn #12 commission to ₹2,500 (5%)");
-        await sequelize.query(`
-          UPDATE Investments 
-          SET commissionBalance = commissionBalance + 1500.00
-          WHERE userId = (
-            SELECT id FROM Users WHERE userID = 'SI754188' OR email = 'john@gmail.com' LIMIT 1
-          );
-        `);
-      }
 
-      // Auto-fix past Daily Level 1 Commission transactions from ₹1.67 to ₹83.33
-      const [fixedDailyTxns] = await sequelize.query(`
-        UPDATE InvestmentTransactions 
-        SET amount = 83.33, 
-            description = REPLACE(REPLACE(description, '1.67', '83.33'), '(2%)', '(5%)')
-        WHERE description LIKE '%Level 1 Daily Commission%' AND amount < 50;
+      // 4. Recalculate and sync commissionBalance for all users in Investments table
+      await sequelize.query(`
+        UPDATE Investments i
+        JOIN (
+          SELECT userId, SUM(amount) AS totalComm 
+          FROM InvestmentTransactions 
+          WHERE type IN ('LEVEL_COMMISSION', 'DAILY_LEVEL_COMMISSION') 
+          GROUP BY userId
+        ) t ON i.userId = t.userId
+        SET i.commissionBalance = t.totalComm;
       `);
-      if (fixedDailyTxns && fixedDailyTxns.affectedRows > 0) {
-        const count = fixedDailyTxns.affectedRows;
-        console.log(`✅ Fixed ${count} past Daily Level 1 transactions from ₹1.67 to ₹83.33`);
-        await sequelize.query(`
-          UPDATE Investments 
-          SET commissionBalance = commissionBalance + (${count} * 81.66)
-          WHERE userId = (
-            SELECT id FROM Users WHERE userID = 'SI754188' OR email = 'john@gmail.com' LIMIT 1
-          );
-        `);
-        console.log(`✅ Credited +₹${count * 81.66} difference to John's wallet commissionBalance`);
-      }
 
-      // Auto-fix past Daily Level 2 Commission transactions from ₹0.83 to ₹16.67
-      const [fixedDailyL2Txns] = await sequelize.query(`
-        UPDATE InvestmentTransactions 
-        SET amount = 16.67, 
-            description = REPLACE(description, '0.83', '16.67')
-        WHERE description LIKE '%Level 2 Daily Commission%' AND amount < 10;
-      `);
-      if (fixedDailyL2Txns && fixedDailyL2Txns.affectedRows > 0) {
-        const count = fixedDailyL2Txns.affectedRows;
-        console.log(`✅ Fixed ${count} past Daily Level 2 transactions from ₹0.83 to ₹16.67`);
-        await sequelize.query(`
-          UPDATE Investments 
-          SET commissionBalance = commissionBalance + (${count} * 15.84)
-          WHERE userId = (
-            SELECT id FROM Users WHERE userID = 'SI754188' OR email = 'john@gmail.com' LIMIT 1
-          );
-        `);
-        console.log(`✅ Credited +₹${count * 15.84} difference to John's wallet commissionBalance`);
-      }
+      console.log("✅ Server startup DB sync completed successfully.");
     } catch (migErr) {
       console.error("Migration fix error (non-fatal):", migErr.message);
     }
