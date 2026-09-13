@@ -292,43 +292,6 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
         `);
         console.log(`✅ Credited +₹${count * 15.84} difference to John's wallet commissionBalance`);
       }
-
-      // Auto-fix: Reassign Kandi Satyanarayana (SI433872 / ID 77) sponsor to MYLAPALLI GURUMURTHY (SI564946 / ID 76)
-      try {
-        const [updateUsersResult] = await sequelize.query(`
-          UPDATE Users 
-          SET sponsorId = (
-            SELECT id FROM (SELECT id FROM Users WHERE id = 76 OR userID = 'SI564946' OR email = 'gurumurthymylapalli7@gmail.com' LIMIT 1) AS tmp_g
-          )
-          WHERE id = 77 OR userID = 'SI433872' OR email = 'gollakandi2121@gmail.com';
-        `);
-
-        await sequelize.query(`
-          UPDATE Referrals 
-          SET sponsorId = (
-            SELECT id FROM (SELECT id FROM Users WHERE id = 76 OR userID = 'SI564946' OR email = 'gurumurthymylapalli7@gmail.com' LIMIT 1) AS tmp_g
-          )
-          WHERE referredUserId = (
-            SELECT id FROM (SELECT id FROM Users WHERE id = 77 OR userID = 'SI433872' OR email = 'gollakandi2121@gmail.com' LIMIT 1) AS tmp_s
-          );
-        `).catch(() => {});
-
-        await sequelize.query(`
-          UPDATE ReferralEdges 
-          SET sponsorId = (
-            SELECT id FROM (SELECT id FROM Users WHERE id = 76 OR userID = 'SI564946' OR email = 'gurumurthymylapalli7@gmail.com' LIMIT 1) AS tmp_g
-          )
-          WHERE childId = (
-            SELECT id FROM (SELECT id FROM Users WHERE id = 77 OR userID = 'SI433872' OR email = 'gollakandi2121@gmail.com' LIMIT 1) AS tmp_s
-          );
-        `).catch(() => {});
-
-        if (updateUsersResult && updateUsersResult.affectedRows > 0) {
-          console.log("✅ Reassigned Kandi Satyanarayana sponsor to MYLAPALLI GURUMURTHY");
-        }
-      } catch (errSatya) {
-        console.error("Error updating sponsor for Kandi Satyanarayana:", errSatya.message);
-      }
     } catch (migErr) {
       console.error("Migration fix error (non-fatal):", migErr.message);
     }

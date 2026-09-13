@@ -216,7 +216,8 @@ router.put("/:id", auth, (req, res) => {
 
       // password update
       if (password) {
-        user.password = password; // ⚠️ plain save
+        const salt = await bcrypt.genSalt(10);
+        user.password = await bcrypt.hash(password, salt);
       }
 
       // bank details update
