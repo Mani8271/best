@@ -22,10 +22,10 @@ async function processDailyPayouts(batchSize = 500) {
 
   // Fetch dynamic settings
   const monthlyRoiPct = await getSettingNumber("INVESTMENT_ROI_PERCENT", 5);
-  const level1Pct = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", 5);
-  const level2Pct = await getSettingNumber("INVESTMENT_LEVEL_2_PERCENT", 1);
-  const level3Pct = await getSettingNumber("INVESTMENT_LEVEL_3_PERCENT", 0.5);
-  const level4Pct = await getSettingNumber("INVESTMENT_LEVEL_4_PERCENT", 0.25);
+  const level1Pct = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", 2);
+  const level2Pct = await getSettingNumber("INVESTMENT_LEVEL_2_PERCENT", 1.5);
+  const level3Pct = await getSettingNumber("INVESTMENT_LEVEL_3_PERCENT", 1.0);
+  const level4Pct = await getSettingNumber("INVESTMENT_LEVEL_4_PERCENT", 0.5);
 
   // Daily ROI rate = (Monthly ROI %) / 30 / 100
   const dailyRoiRate = monthlyRoiPct / 30 / 100;

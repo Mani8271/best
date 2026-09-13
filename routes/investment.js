@@ -355,11 +355,12 @@ async function build4LevelTree(rootUserId) {
 router.get("/admin/settings", auth, isAdmin, async (req, res) => {
   try {
     const minWithdrawalAmount = await getSettingNumber("INVESTMENT_MIN_WITHDRAWAL", 2500);
+    const spotPercent = await getSettingNumber("INVESTMENT_SPOT_REFERRAL_PERCENT", 5);
     const roiPercent = await getSettingNumber("INVESTMENT_ROI_PERCENT", 5);
-    const level1Percent = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", 5);
-    const level2Percent = await getSettingNumber("INVESTMENT_LEVEL_2_PERCENT", 1);
-    const level3Percent = await getSettingNumber("INVESTMENT_LEVEL_3_PERCENT", 0.5);
-    const level4Percent = await getSettingNumber("INVESTMENT_LEVEL_4_PERCENT", 0.25);
+    const level1Percent = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", 2);
+    const level2Percent = await getSettingNumber("INVESTMENT_LEVEL_2_PERCENT", 1.5);
+    const level3Percent = await getSettingNumber("INVESTMENT_LEVEL_3_PERCENT", 1.0);
+    const level4Percent = await getSettingNumber("INVESTMENT_LEVEL_4_PERCENT", 0.5);
 
     return res.status(200).json({
       success: true,
@@ -368,6 +369,7 @@ router.get("/admin/settings", auth, isAdmin, async (req, res) => {
         minWithdrawalAmount,
         INVESTMENT_ROI_PERCENT: roiPercent,
         roiPercent,
+        spotPercent,
         levelCommissions: {
           level1Percent,
           level2Percent,
@@ -609,12 +611,12 @@ router.post("/admin/topup", auth, isAdmin, async (req, res) => {
       { transaction: t }
     );
 
-    // 3. Direct Sponsor 5% Commission Distribution (Level 1 Only)
+    // 3. Direct Sponsor 5% ONE-TIME Spot Commission Distribution on Topup
     const commissionsDistributed = [];
 
     if (targetUser.sponsorId) {
-      const level1Pct = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", 5);
-      const rate = level1Pct / 100;
+      const spotPct = await getSettingNumber("INVESTMENT_SPOT_REFERRAL_PERCENT", 5);
+      const rate = spotPct / 100;
 
       if (rate > 0) {
         const sponsor = await User.findByPk(targetUser.sponsorId, {

@@ -213,8 +213,13 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
     try {
       await sequelize.query(`
         INSERT INTO AppSettings (\`key\`, \`value\`, createdAt, updatedAt) 
-        VALUES ('INVESTMENT_LEVEL_1_PERCENT', '5', NOW(), NOW())
-        ON DUPLICATE KEY UPDATE \`value\` = '5', updatedAt = NOW();
+        VALUES 
+          ('INVESTMENT_SPOT_REFERRAL_PERCENT', '5', NOW(), NOW()),
+          ('INVESTMENT_LEVEL_1_PERCENT', '2', NOW(), NOW()),
+          ('INVESTMENT_LEVEL_2_PERCENT', '1.5', NOW(), NOW()),
+          ('INVESTMENT_LEVEL_3_PERCENT', '1', NOW(), NOW()),
+          ('INVESTMENT_LEVEL_4_PERCENT', '0.5', NOW(), NOW())
+        ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`), updatedAt = NOW();
       `);
 
       // Fix Txn #8 (john2)
