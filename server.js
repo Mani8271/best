@@ -223,9 +223,9 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
         ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`), updatedAt = NOW();
       `);
 
-      // 2. Remove duplicate transaction #103 if present
+      // 2. Remove duplicate transactions #99 and #103 if present
       await sequelize.query(`
-        DELETE FROM InvestmentTransactions WHERE id = 103;
+        DELETE FROM InvestmentTransactions WHERE id IN (99, 103);
       `).catch(() => {});
 
       // 3. Correct past Daily Level 1 Commission transactions to ₹33.33 (2.00% monthly)
@@ -242,7 +242,8 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
         JOIN (
           SELECT userId, SUM(amount) AS totalComm 
           FROM InvestmentTransactions 
-          WHERE type IN ('LEVEL_COMMISSION', 'DAILY_LEVEL_COMMISSION') 
+          WHERE amount > 0 
+            AND (description LIKE '%Commission%' OR description LIKE '%Referral%' OR description LIKE '%Level%')
           GROUP BY userId
         ) t ON i.userId = t.userId
         SET i.commissionBalance = t.totalComm;
