@@ -214,10 +214,9 @@ router.put("/:id", auth, (req, res) => {
         user.role = r;
       }
 
-      // password update
+      // password update (plain text save so admin can view/manage)
       if (password) {
-        const salt = await bcrypt.genSalt(10);
-        user.password = await bcrypt.hash(password, salt);
+        user.password = String(password).trim();
       }
 
       // bank details update
@@ -326,18 +325,22 @@ router.post("/change-password", auth, async (req, res) => {
     const user = await User.findByPk(req.user.id);
     if (!user) return res.status(404).json({ msg: "User not found" });
 
-    // ✅ plain verify
-    if (String(oldPassword) !== String(user.password)) {
+    // Verify old password (supports both bcrypt hash and plain text)
+    let oldIsMatch = false;
+    const storedPass = String(user.password || "");
+    if (storedPass.startsWith("$2a$") || storedPass.startsWith("$2b$") || storedPass.startsWith("$2y$")) {
+      oldIsMatch = await bcrypt.compare(String(oldPassword), storedPass);
+    } else {
+      oldIsMatch = (String(oldPassword) === storedPass);
+    }
+
+    if (!oldIsMatch) {
       return res.status(400).json({ msg: "Old password is incorrect" });
     }
 
-    // ✅ prevent same password
-    if (String(newPassword) === String(user.password)) {
-      return res.status(400).json({ msg: "New password must be different" });
-    }
-
-    // ✅ update plain
-    user.password = String(newPassword);
+    // Hash and save new password
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(String(newPassword), salt);
     await user.save();
 
     return res.json({ msg: "Password updated successfully" });

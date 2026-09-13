@@ -1174,7 +1174,15 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ msg: "Invalid userID or password" });
     }
 
-    if (String(password) !== String(user.password)) {
+    let isMatch = false;
+    const storedPass = String(user.password || "");
+    if (storedPass.startsWith("$2a$") || storedPass.startsWith("$2b$") || storedPass.startsWith("$2y$")) {
+      isMatch = await bcrypt.compare(String(password), storedPass);
+    } else {
+      isMatch = (String(password) === storedPass);
+    }
+
+    if (!isMatch) {
       return res.status(400).json({ msg: "Invalid userID or password" });
     }
 

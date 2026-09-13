@@ -89,17 +89,13 @@ router.post("/register", async (req, res) => {
       }
     }
 
-    // Hash password
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
-    // Always create a FRESH User record specifically for Investment
+    // Always create a FRESH User record specifically for Investment (plain text password so visible in Admin)
     const user = await User.create(
       {
         name: String(name).trim(),
         email: cleanEmail,
         phone: cleanPhone,
-        password: hashedPassword,
+        password: String(password).trim(),
         userID: newSI_ID,
         referralCode: newSI_ID, // SI ID also serves as referral code (e.g. SI566665)
         sponsorId: sponsorId || null,
@@ -193,8 +189,15 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ msg: "Invalid credentials. User not found." });
     }
 
-    // Compare password
-    const isMatch = await bcrypt.compare(password, user.password);
+    // Compare password (supports both bcrypt hash & plain text)
+    let isMatch = false;
+    const storedPass = String(user.password || "");
+    if (storedPass.startsWith("$2a$") || storedPass.startsWith("$2b$") || storedPass.startsWith("$2y$")) {
+      isMatch = await bcrypt.compare(String(password), storedPass);
+    } else {
+      isMatch = (String(password) === storedPass);
+    }
+
     if (!isMatch) {
       return res.status(400).json({ msg: "Invalid credentials. Incorrect password." });
     }
