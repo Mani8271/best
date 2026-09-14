@@ -24,6 +24,22 @@ const createDefaultReferralLinks = async (userId, t = null) => {
 // GET /api/referrals
 router.get("/", auth, async (req, res) => {
   try {
+    const isInvestment = req.user.userType === "INVESTMENT_USER" || req.query.type === "investment";
+    if (isInvestment) {
+      const refCode = req.user.referralCode || req.user.userID;
+      const url = `https://mysun.in/investment-register?ref=${refCode}`;
+      return res.json([
+        {
+          id: req.user.id,
+          userID: req.user.userID,
+          referralCode: refCode,
+          name: req.user.name,
+          url,
+          referralUrl: url,
+        },
+      ]);
+    }
+
     const links = await ReferralLink.findAll({
       where: { sponsorId: req.user.id },
     });
@@ -32,8 +48,7 @@ router.get("/", auth, async (req, res) => {
       const linkData = link.toJSON ? link.toJSON() : link;
       return {
         ...linkData,
-        url: `https://mysun.in/register?ref=${link.code}&pos=${link.position
-          }&by=${encodeURIComponent(req.user.name)}`,
+        url: `https://mysun.in/register?ref=${link.code}&pos=${link.position}&by=${encodeURIComponent(req.user.name)}`,
       };
     });
 

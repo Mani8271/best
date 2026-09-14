@@ -43,6 +43,63 @@ const signToken = (id) =>
 const generateReferralCode = () =>
   "R" + Math.random().toString(36).substring(2, 8).toUpperCase();
 
+/**
+ * @route   GET /api/auth/sponsor-info/:userID
+ * @desc    Public API (No Auth) to fetch user name & info by userID or referralCode
+ * @access  Public
+ */
+router.get(["/sponsor-info/:userID", "/user-info/:userID", "/public-user/:userID"], async (req, res) => {
+  try {
+    const rawInput = (req.params.userID || req.query.userID || "").trim();
+    if (!rawInput) {
+      return res.status(400).json({ success: false, msg: "userID or referralCode parameter is required" });
+    }
+
+    const user = await User.findOne({
+      where: {
+        [Op.or]: [
+          { userID: rawInput },
+          { referralCode: rawInput },
+          { userID: rawInput.toUpperCase() },
+          { referralCode: rawInput.toUpperCase() },
+          { email: rawInput.toLowerCase() },
+          { id: isNaN(rawInput) ? 0 : Number(rawInput) },
+        ],
+      },
+      attributes: ["id", "userID", "referralCode", "name", "email", "phone", "userType", "status", "createdAt"],
+    });
+
+    if (!user) {
+      return res.status(404).json({ success: false, msg: "User / Sponsor not found" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      exists: true,
+      userID: user.userID,
+      referralCode: user.referralCode,
+      name: user.name,
+      sponsorName: user.name,
+      sponsorID: user.userID,
+      userType: user.userType,
+      status: user.status,
+      user: {
+        id: user.id,
+        userID: user.userID,
+        referralCode: user.referralCode,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        userType: user.userType,
+        status: user.status,
+      },
+    });
+  } catch (err) {
+    console.error("Public Sponsor Info Lookup Error:", err);
+    return res.status(500).json({ success: false, msg: err.message });
+  }
+});
+
 // ========================= WALLET CREDIT (returns txn) =========================
 // ✅ JOIN + PAIR both pending rules
 async function creditWallet({ userId, amount, reason, meta, t }) {

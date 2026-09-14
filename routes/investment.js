@@ -43,6 +43,69 @@ const generateInvestmentUserID = async (t) => {
 };
 
 /* ======================================================================================
+   🔑 PUBLIC SPONSOR / USER LOOKUP API (NO AUTH REQUIRED)
+====================================================================================== */
+
+/**
+ * @route   GET /api/investment/sponsor-info/:userID
+ * @desc    Public API (No Auth) to fetch user details (name, userID, etc.) by userID or referralCode
+ * @access  Public
+ */
+router.get(["/sponsor-info/:userID", "/user-info/:userID", "/public-user/:userID"], async (req, res) => {
+  try {
+    const rawInput = (req.params.userID || req.query.userID || "").trim();
+    if (!rawInput) {
+      return res.status(400).json({ success: false, msg: "userID or referralCode parameter is required" });
+    }
+
+    const user = await User.findOne({
+      where: {
+        [Op.or]: [
+          { userID: rawInput },
+          { referralCode: rawInput },
+          { userID: rawInput.toUpperCase() },
+          { referralCode: rawInput.toUpperCase() },
+          { email: rawInput.toLowerCase() },
+          { id: isNaN(rawInput) ? 0 : Number(rawInput) },
+        ],
+      },
+      attributes: ["id", "userID", "referralCode", "name", "email", "phone", "userType", "status", "createdAt"],
+    });
+
+    if (!user) {
+      return res.status(404).json({ success: false, msg: "User / Sponsor not found" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      exists: true,
+      userID: user.userID,
+      referralCode: user.referralCode,
+      name: user.name,
+      sponsorName: user.name,
+      sponsorID: user.userID,
+      email: user.email,
+      phone: user.phone,
+      userType: user.userType,
+      status: user.status,
+      user: {
+        id: user.id,
+        userID: user.userID,
+        referralCode: user.referralCode,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        userType: user.userType,
+        status: user.status,
+      },
+    });
+  } catch (err) {
+    console.error("Public Sponsor Info Lookup Error:", err);
+    return res.status(500).json({ success: false, msg: err.message });
+  }
+});
+
+/* ======================================================================================
    🔑 DYNAMIC INVESTMENT REGISTER & LOGIN APIs
 ====================================================================================== */
 
@@ -101,7 +164,7 @@ router.post("/register", async (req, res) => {
         sponsorId: sponsorId || null,
         role: "USER",
         userType: "INVESTMENT_USER",
-        status: "ACTIVE",
+        status: "INACTIVE",
       },
       { transaction: t }
     );
@@ -200,6 +263,10 @@ router.post("/login", async (req, res) => {
 
     if (!isMatch) {
       return res.status(400).json({ msg: "Invalid credentials. Incorrect password." });
+    }
+
+    if (user.status === "INACTIVE") {
+      return res.status(403).json({ msg: "Your account is currently inactive. Please contact admin for activation." });
     }
 
     // Fetch user's Investment wallet
@@ -594,6 +661,15 @@ router.post("/admin/topup", auth, isAdmin, async (req, res) => {
     investment.status = "ACTIVE";
     await investment.save({ transaction: t });
 
+    // Activate user account if currently INACTIVE
+    if (targetUser.status !== "ACTIVE") {
+      targetUser.status = "ACTIVE";
+      if (!targetUser.activationDate) {
+        targetUser.activationDate = new Date();
+      }
+      await targetUser.save({ transaction: t });
+    }
+
     // 2. Log DEPOSIT transaction
     const depositTxn = await InvestmentTransaction.create(
       {
@@ -726,18 +802,51 @@ router.get("/referral-info", auth, async (req, res) => {
       ],
     });
 
+    const refCode = user.referralCode || user.userID;
+    const referralUrl = `https://mysun.in/investment-register?ref=${refCode}`;
+
     return res.status(200).json({
       success: true,
       referralInfo: {
         userID: user.userID,
-        referralCode: user.referralCode,
+        referralCode: refCode,
         sponsor: user.sponsor || null,
-        referralLink: `http://localhost:3000/register?ref=${user.referralCode}`,
+        referralLink: referralUrl,
+        url: referralUrl,
       },
+      url: referralUrl,
     });
   } catch (err) {
     console.error("Get Referral Info Error:", err);
-    return res.status(500).json({ msg: "Failed to fetch referral info", error: err.message });
+    return res.status(500).json({ success: false, msg: "Failed to fetch referral info", error: err.message });
+  }
+});
+
+/**
+ * @route   GET /api/investment/referral-link
+ * @desc    Get logged-in user's investment referral link.
+ * @access  Authenticated User
+ */
+router.get("/referral-link", auth, async (req, res) => {
+  try {
+    const user = await User.findByPk(req.user.id, {
+      attributes: ["id", "name", "userID", "referralCode"],
+    });
+
+    const refCode = user.referralCode || user.userID;
+    const referralUrl = `https://mysun.in/investment-register?ref=${refCode}`;
+
+    return res.status(200).json({
+      success: true,
+      userID: user.userID,
+      referralCode: refCode,
+      name: user.name,
+      url: referralUrl,
+      referralUrl,
+    });
+  } catch (err) {
+    console.error("Get Referral Link Error:", err);
+    return res.status(500).json({ success: false, msg: err.message });
   }
 });
 
