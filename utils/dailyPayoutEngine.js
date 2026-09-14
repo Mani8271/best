@@ -110,6 +110,11 @@ async function processDailyPayouts(batchSize = 500) {
         totalRoiDistributed += dailyRoi;
 
         // 2. Traversal Upline 4-Levels for Daily Level Commissions
+        const investorUserNode = await User.findByPk(investment.userId, {
+          attributes: ["id", "name", "userID"],
+          transaction: t,
+        });
+
         let currentUserId = investment.userId;
 
         for (let level = 1; level <= 4; level++) {
@@ -134,7 +139,7 @@ async function processDailyPayouts(batchSize = 500) {
           const rate = rates[level] || 0;
           if (rate > 0) {
             // Daily Level Commission = (Active Investment * Monthly Rate) / 30 days
-            // e.g. ₹50,000 * 5% / 30 = ₹83.33 per day
+            // e.g. ₹50,000 * 2% / 30 = ₹33.33 per day
             const commAmount = Number((numActive * (rate / 30)).toFixed(2));
 
             if (commAmount > 0) {
@@ -155,6 +160,9 @@ async function processDailyPayouts(batchSize = 500) {
               sponsorInvestment.commissionBalance = Number(sponsorInvestment.commissionBalance || 0) + commAmount;
               await sponsorInvestment.save({ transaction: t });
 
+              const fromName = investorUserNode ? investorUserNode.name : currentUserNode.name;
+              const fromUserID = investorUserNode ? investorUserNode.userID : currentUserNode.userID;
+
               await InvestmentTransaction.create(
                 {
                   userId: sponsor.id,
@@ -162,14 +170,14 @@ async function processDailyPayouts(batchSize = 500) {
                   amount: commAmount,
                   level,
                   fromUserId: investment.userId,
-                  description: `Level ${level} Daily Commission (${(rate * 100).toFixed(2)}% monthly) from ${currentUserNode.name} (${currentUserNode.userID}) active investment of ₹${numActive.toLocaleString("en-IN")}`,
+                  description: `Level ${level} Daily Commission (${(rate * 100).toFixed(2)}% monthly) from ${fromName} (${fromUserID}) active investment of ₹${numActive.toLocaleString("en-IN")}`,
                   meta: {
                     date: todayStr,
                     level,
                     ratePercentage: rate * 100,
                     investorActiveInvestment: numActive,
-                    investorUserId: currentUserNode.userID,
-                    investorName: currentUserNode.name,
+                    investorUserId: fromUserID,
+                    investorName: fromName,
                   },
                 },
                 { transaction: t }
