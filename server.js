@@ -226,7 +226,7 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
       // 2. Remove duplicate transactions #99 and #103 if present
       await sequelize.query(`
         DELETE FROM InvestmentTransactions WHERE id IN (99, 103);
-      `).catch(() => {});
+      `).catch(() => { });
 
       // 3. Correct past Daily Level 1 Commission transactions to ₹33.33 (2.00% monthly)
       await sequelize.query(`
