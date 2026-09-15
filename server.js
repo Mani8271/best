@@ -206,8 +206,12 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
     await sequelize.authenticate();
     console.log("✅ MySQL authenticated");
 
-    await sequelize.sync({ alter: true }); // ✅ creates new tables & auto-syncs new columns safely
-    console.log("✅ MySQL synced (alter mode)");
+    try {
+      await sequelize.sync(); // ✅ Safe sync (creates missing tables without alter failure)
+      console.log("✅ MySQL synced");
+    } catch (syncErr) {
+      console.warn("⚠️ MySQL sync warning (non-fatal):", syncErr.message);
+    }
 
     // Auto-fix & DB Sync on server startup
     try {
@@ -277,10 +281,12 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
       console.error("❌ [Startup Payout Check Error]:", err.message);
     });
 
-    app.listen(3000, () => console.log("Server running on 3000"));
+    const PORT = process.env.PORT || 3000;
+    app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
   } catch (err) {
-    console.error("❌ DB ERROR:", err);
-    process.exit(1);
+    console.error("❌ DB / STARTUP ERROR:", err);
+    const PORT = process.env.PORT || 3000;
+    app.listen(PORT, () => console.log(`⚠️ Server running in fallback mode on port ${PORT}`));
   }
 })();
 // sequelize.sync({alter:true}).then(() => console.log('MySQL connected'))
