@@ -1641,14 +1641,32 @@ router.get("/admin/user-investment/:userID", auth, isAdmin, async (req, res) => 
  */
 router.get("/admin/all-investments", auth, isAdmin, async (req, res) => {
   try {
-    const investments = await Investment.findAll({
+    const rawInvestments = await Investment.findAll({
       include: [
         {
           model: User,
-          attributes: ["id", "name", "userID", "email", "phone"],
+          attributes: ["id", "name", "userID", "email", "phone", "sponsorId"],
+          include: [
+            {
+              model: User,
+              as: "sponsor",
+              attributes: ["id", "name", "userID", "email", "phone"],
+            },
+          ],
         },
       ],
       order: [["totalInvested", "DESC"]],
+    });
+
+    const investments = rawInvestments.map((inv) => {
+      const invObj = inv.toJSON();
+      if (invObj.User) {
+        const sponsor = invObj.User.sponsor || null;
+        invObj.User.sponsorId = invObj.User.sponsorId || (sponsor ? sponsor.id : null);
+        invObj.User.sponsorName = sponsor ? sponsor.name : null;
+        invObj.User.sponsorUserID = sponsor ? sponsor.userID : null;
+      }
+      return invObj;
     });
 
     return res.status(200).json({
