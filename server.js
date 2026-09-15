@@ -273,6 +273,7 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
         }
       },
       { timezone: "Asia/Kolkata" }
+
     );
     console.log("⏰ Daily Payout Cron Job Scheduled (Runs at 00:00 Midnight IST daily)");
 
