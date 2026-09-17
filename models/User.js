@@ -64,7 +64,7 @@ const User = sequelize.define("User", {
   nomineePhone: { type: DataTypes.STRING, allowNull: true },
 
   status: {
-    type: DataTypes.ENUM("ACTIVE", "INACTIVE"),
+    type: DataTypes.ENUM("ACTIVE", "INACTIVE", "INACTIVE_BY_ADMIN"),
     allowNull: false,
     defaultValue: "INACTIVE",
   },

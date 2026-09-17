@@ -240,8 +240,8 @@ router.put("/:id", auth, (req, res) => {
 
       if (status !== undefined) {
         const s = status.toString().toUpperCase();
-        if (!["ACTIVE", "INACTIVE"].includes(s)) {
-          return res.status(400).json({ msg: "Invalid status (must be ACTIVE or INACTIVE)" });
+        if (!["ACTIVE", "INACTIVE", "INACTIVE_BY_ADMIN"].includes(s)) {
+          return res.status(400).json({ msg: "Invalid status (must be ACTIVE, INACTIVE, or INACTIVE_BY_ADMIN)" });
         }
         user.status = s;
       }

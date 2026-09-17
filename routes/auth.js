@@ -1245,10 +1245,9 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ msg: "Invalid userID or password" });
     }
 
-    // Allow INACTIVE users to log in as per requirements
-    // if (user.status === "INACTIVE") {
-    //   return res.status(403).json({ msg: "Your account is inactive. Please contact admin." });
-    // }
+    if (user.status === "INACTIVE_BY_ADMIN") {
+      return res.status(403).json({ msg: "Your account has been suspended by admin." });
+    }
 
     const token = signToken(user.id);
 

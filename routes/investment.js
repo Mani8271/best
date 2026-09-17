@@ -265,10 +265,9 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ msg: "Invalid credentials. Incorrect password." });
     }
 
-    // Allow INACTIVE users to log in as per requirements
-    // if (user.status === "INACTIVE") {
-    //   return res.status(403).json({ msg: "Your account is currently inactive. Please contact admin for activation." });
-    // }
+    if (user.status === "INACTIVE_BY_ADMIN") {
+      return res.status(403).json({ msg: "Your account has been suspended by admin." });
+    }
 
     // Fetch user's Investment wallet
     let investment = await Investment.findOne({ where: { userId: user.id } });
