@@ -65,14 +65,8 @@ const InvestmentTransaction = require("./models/InvestmentTransaction.js");
 const InvestmentWithdrawal = require("./models/InvestmentWithdrawal.js");
 const InvestmentBankDetail = require("./models/InvestmentBankDetail.js");
 const investmentRoutes = require("./routes/investment.js");
-
-
-
-
-
-
-
-
+const DepositRequest = require("./models/DepositRequest.js");
+const depositRoutes = require("./routes/deposits.js");
 
 const app = express()
 
@@ -106,6 +100,7 @@ app.use("/api/settings", settingsRoutes);
 // app.use("/api/binary", referralTreeRoutes);
 app.use("/api/pairs", pairsRoutes);
 app.use("/api/withdrawals", withdrawalRoutes);
+app.use("/api/deposits", depositRoutes);
 app.use("/api/reports", reportsRoutes);
 app.use("/api/awards", awardsRoutes);
 
@@ -118,6 +113,10 @@ app.use("/api/investments", investmentRoutes);
 
 
 /* relations */
+DepositRequest.belongsTo(User, { foreignKey: "userId", as: "user" });
+User.hasMany(DepositRequest, { foreignKey: "userId" });
+DepositRequest.belongsTo(User, { foreignKey: "processedBy", as: "processedByAdmin" });
+
 Investment.belongsTo(User, { foreignKey: "userId" });
 User.hasOne(Investment, { foreignKey: "userId" });
 

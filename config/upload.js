@@ -25,9 +25,10 @@ const profileDir = path.join(ROOT, "profilePics");
 const categoryDir = path.join(ROOT, "categories");
 const subCategoryDir = path.join(ROOT, "subcategories");
 const bannerDir = path.join(ROOT, "banners");
+const depositDir = path.join(ROOT, "deposits");
 const kycDir = path.join(ROOT, "kyc");
 
-[productDir, profileDir, categoryDir, subCategoryDir, bannerDir, kycDir].forEach(ensureDir);
+[productDir, profileDir, categoryDir, subCategoryDir, bannerDir, kycDir, depositDir].forEach(ensureDir);
 
 const allowed = new Set(["image/jpeg", "image/png", "image/webp"]);
 
@@ -80,6 +81,12 @@ const uploadBannerImage = multer({
   limits: { fileSize: 3 * 1024 * 1024 },
 }).single("image");
 
+const uploadDepositProof = multer({
+  storage: makeStorage(depositDir),
+  fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 },
+}).single("proofPic");
+
 const uploadUserDocs = multer({
   storage: makeStorage(kycDir),
   fileFilter,
@@ -99,5 +106,6 @@ module.exports = {
   uploadCategoryImage,
   uploadSubCategoryImage,
   uploadBannerImage,
+  uploadDepositProof,
   uploadUserDocs,
 };
