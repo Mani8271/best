@@ -771,6 +771,7 @@ router.post("/register", (req, res) => {
           password,
           referralCode: myCode,
           role: roleToSave,
+          status: "INACTIVE",
           ...(userType ? { userType } : {}),
           ...(profilePic ? { profilePic } : {}),
           ...(bankPhoto ? { bankPhoto } : {}),
@@ -1046,6 +1047,7 @@ router.post("/placement-register", optionalAuth, (req, res) => {
           password,
           referralCode: myCode,
           role: String(role || "USER").toUpperCase(),
+          status: "INACTIVE",
           sponsorId: parentUser.id, // bonus receiver = entered parentId user
           ...(userType ? { userType } : {}),
           ...(profilePic ? { profilePic } : {}),
@@ -1243,9 +1245,10 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ msg: "Invalid userID or password" });
     }
 
-    if (user.status === "INACTIVE") {
-      return res.status(403).json({ msg: "Your account is inactive. Please contact admin." });
-    }
+    // Allow INACTIVE users to log in as per requirements
+    // if (user.status === "INACTIVE") {
+    //   return res.status(403).json({ msg: "Your account is inactive. Please contact admin." });
+    // }
 
     const token = signToken(user.id);
 

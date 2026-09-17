@@ -8,6 +8,9 @@ const DepositRequest = require("../models/DepositRequest.js");
 const User = require("../models/User.js");
 const Wallet = require("../models/Wallet.js");
 const WalletTransaction = require("../models/WalletTransaction.js");
+const Investment = require("../models/Investment.js");
+const InvestmentTransaction = require("../models/InvestmentTransaction.js");
+const { getSettingNumber } = require("../utils/appSettings.js");
 
 const router = express.Router();
 
@@ -216,6 +219,9 @@ router.put("/:id/action", auth, isAdmin, async (req, res) => {
     }
 
     if (action === "APPROVE") {
+      const depositAmount = Number(deposit.amount);
+
+      // 1. Find or create main Wallet & credit balance
       let wallet = await Wallet.findOne({
         where: { userId: deposit.userId },
         transaction: t,
@@ -229,7 +235,6 @@ router.put("/:id/action", auth, isAdmin, async (req, res) => {
         );
       }
 
-      const depositAmount = Number(deposit.amount);
       const newBal = Math.round((Number(wallet.balance) + depositAmount + Number.EPSILON) * 100) / 100;
       const lockedBal = Number(wallet.lockedBalance || 0);
 
@@ -256,6 +261,115 @@ router.put("/:id/action", auth, isAdmin, async (req, res) => {
         { transaction: t }
       );
 
+      // 2. Target User details & Account Activation
+      const targetUser = await User.findByPk(deposit.userId, {
+        transaction: t,
+        lock: t.LOCK.UPDATE,
+      });
+
+      if (targetUser) {
+        if (targetUser.status !== "ACTIVE") {
+          targetUser.status = "ACTIVE";
+          if (!targetUser.activationDate) {
+            targetUser.activationDate = new Date();
+          }
+          await targetUser.save({ transaction: t });
+        }
+
+        // 3. Investment Wallet Topup
+        let [investment] = await Investment.findOrCreate({
+          where: { userId: targetUser.id },
+          defaults: {
+            totalInvested: 0,
+            activeInvestment: 0,
+            roiBalance: 0,
+            commissionBalance: 0,
+            totalWithdrawn: 0,
+            status: "ACTIVE",
+          },
+          transaction: t,
+          lock: t.LOCK.UPDATE,
+        });
+
+        investment.totalInvested = Number(investment.totalInvested || 0) + depositAmount;
+        investment.activeInvestment = Number(investment.activeInvestment || 0) + depositAmount;
+        investment.status = "ACTIVE";
+        await investment.save({ transaction: t });
+
+        // 4. Log Investment DEPOSIT Transaction
+        await InvestmentTransaction.create(
+          {
+            userId: targetUser.id,
+            type: "DEPOSIT",
+            amount: depositAmount,
+            createdAdminId: adminId,
+            description: adminNote || `Deposit of ₹${depositAmount.toLocaleString("en-IN")} approved by Admin (${deposit.paymode})`,
+            meta: {
+              depositRequestId: deposit.id,
+              paymode: deposit.paymode,
+              adminId,
+              remark: adminNote || null,
+            },
+          },
+          { transaction: t }
+        );
+
+        // 5. Direct Sponsor 5% Spot Commission Distribution on Topup
+        if (targetUser.sponsorId) {
+          const spotPct = await getSettingNumber("INVESTMENT_SPOT_REFERRAL_PERCENT", t);
+          const rate = (Number.isFinite(spotPct) && spotPct > 0 ? spotPct : 5) / 100;
+
+          if (rate > 0) {
+            const sponsor = await User.findByPk(targetUser.sponsorId, {
+              transaction: t,
+              lock: t.LOCK.UPDATE,
+            });
+
+            if (sponsor) {
+              const commAmount = Number((depositAmount * rate).toFixed(2));
+
+              let [sponsorInvestment] = await Investment.findOrCreate({
+                where: { userId: sponsor.id },
+                defaults: {
+                  totalInvested: 0,
+                  activeInvestment: 0,
+                  roiBalance: 0,
+                  commissionBalance: 0,
+                  totalWithdrawn: 0,
+                  status: "ACTIVE",
+                },
+                transaction: t,
+                lock: t.LOCK.UPDATE,
+              });
+
+              sponsorInvestment.commissionBalance = Number(sponsorInvestment.commissionBalance || 0) + commAmount;
+              await sponsorInvestment.save({ transaction: t });
+
+              await InvestmentTransaction.create(
+                {
+                  userId: sponsor.id,
+                  type: "LEVEL_COMMISSION",
+                  amount: commAmount,
+                  level: 1,
+                  fromUserId: targetUser.id,
+                  createdAdminId: adminId,
+                  description: `Direct Referral Commission (${rate * 100}%) from ${targetUser.name} (${targetUser.userID || targetUser.id}) deposit of ₹${depositAmount.toLocaleString("en-IN")}`,
+                  meta: {
+                    level: 1,
+                    ratePercentage: rate * 100,
+                    investmentAmount: depositAmount,
+                    depositRequestId: deposit.id,
+                    investorUserId: targetUser.userID || targetUser.id,
+                    investorName: targetUser.name,
+                  },
+                },
+                { transaction: t }
+              );
+            }
+          }
+        }
+      }
+
       deposit.status = "APPROVED";
       deposit.adminNote = adminNote || deposit.adminNote;
       deposit.processedBy = adminId;
@@ -264,7 +378,7 @@ router.put("/:id/action", auth, isAdmin, async (req, res) => {
 
       await t.commit();
       return res.json({
-        msg: "Deposit request approved successfully and wallet credited",
+        msg: "Deposit request approved successfully. Wallet credited and topup processed.",
         deposit,
         wallet: {
           balance: wallet.balance,

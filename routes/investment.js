@@ -265,9 +265,10 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ msg: "Invalid credentials. Incorrect password." });
     }
 
-    if (user.status === "INACTIVE") {
-      return res.status(403).json({ msg: "Your account is currently inactive. Please contact admin for activation." });
-    }
+    // Allow INACTIVE users to log in as per requirements
+    // if (user.status === "INACTIVE") {
+    //   return res.status(403).json({ msg: "Your account is currently inactive. Please contact admin for activation." });
+    // }
 
     // Fetch user's Investment wallet
     let investment = await Investment.findOne({ where: { userId: user.id } });
