@@ -223,6 +223,11 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
 
     // Auto-fix & DB Sync on server startup
     try {
+      // 0. Ensure spotBalance and updated ENUMs exist in DB tables
+      await sequelize.query(`ALTER TABLE Wallets ADD COLUMN spotBalance DECIMAL(10,2) NOT NULL DEFAULT 0.00;`).catch(() => {});
+      await sequelize.query(`ALTER TABLE Investments ADD COLUMN spotBalance DECIMAL(12,2) NOT NULL DEFAULT 0.00;`).catch(() => {});
+      await sequelize.query(`ALTER TABLE Users MODIFY COLUMN status ENUM('ACTIVE', 'INACTIVE', 'INACTIVE_BY_ADMIN') NOT NULL DEFAULT 'INACTIVE';`).catch(() => {});
+
       // 1. Ensure dynamic AppSettings values are set in DB
       await sequelize.query(`
         INSERT INTO AppSettings (\`key\`, \`value\`, createdAt, updatedAt) 
