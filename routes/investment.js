@@ -1197,6 +1197,85 @@ router.get("/my-wallet", auth, async (req, res) => {
   }
 });
 
+/**
+ * @route   GET /api/investment/my-transactions
+ * @desc    Get current logged-in user's investment transaction history with pagination & optional type/date filters.
+ * @access  Authenticated User
+ * Query:   page=1&limit=10&type=DAILY_ROI&startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+ */
+router.get("/my-transactions", auth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.max(1, Math.min(Number(req.query.limit) || 10, 100)); // Default 10 items per page
+    const offset = (page - 1) * limit;
+
+    const { type, startDate, endDate, date, today } = req.query;
+
+    const where = { userId };
+
+    if (type && String(type).trim() !== "") {
+      where.type = String(type).trim().toUpperCase();
+    }
+
+    if (today === "true") {
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+
+      const endOfToday = new Date();
+      endOfToday.setHours(23, 59, 59, 999);
+
+      where.createdAt = { [Op.between]: [startOfToday, endOfToday] };
+    } else if (date) {
+      const start = new Date(date);
+      start.setHours(0, 0, 0, 0);
+
+      const end = new Date(date);
+      end.setHours(23, 59, 59, 999);
+
+      where.createdAt = { [Op.between]: [start, end] };
+    } else if (startDate && endDate) {
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+
+      where.createdAt = { [Op.between]: [start, end] };
+    }
+
+    const { count, rows } = await InvestmentTransaction.findAndCountAll({
+      where,
+      include: [
+        {
+          model: User,
+          as: "fromUser",
+          attributes: ["id", "name", "userID"],
+        },
+      ],
+      order: [["createdAt", "DESC"]],
+      limit,
+      offset,
+    });
+
+    const totalPages = Math.ceil(count / limit);
+
+    return res.status(200).json({
+      success: true,
+      currentPage: page,
+      limit,
+      totalItems: count,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+      transactions: rows,
+    });
+  } catch (err) {
+    console.error("Get My Investment Transactions Error:", err);
+    return res.status(500).json({ success: false, msg: "Failed to fetch transactions", error: err.message });
+  }
+});
+
 /* ======================================================================================
    🗓️ INVESTMENT WITHDRAWAL DATES / WINDOW CONFIGURATION APIs
 ====================================================================================== */
