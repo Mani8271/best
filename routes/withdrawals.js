@@ -82,10 +82,27 @@ router.post("/", auth, async (req, res) => {
     const user = await User.findByPk(userId, { transaction: t, lock: t.LOCK.UPDATE });
     if (!user) throw new Error("User not found");
 
-    // Validate details based on method
+    let payoutMethod = toUpper(req.body.payoutMethod);
+
+    // Auto-detect payoutMethod if not passed in request body
+    if (!payoutMethod) {
+      if (user.bankAccountNumber && user.ifscCode && user.accountHolderName) {
+        payoutMethod = "BANK";
+      } else if (user.upiId) {
+        payoutMethod = "UPI";
+      } else {
+        throw new Error("Payout details missing. Please add Bank Account or UPI ID in profile");
+      }
+    }
+
+    if (!["BANK", "UPI"].includes(payoutMethod)) {
+      throw new Error("payoutMethod must be BANK or UPI");
+    }
+
+    // Validate details based on selected/detected method
     if (payoutMethod === "BANK") {
       if (!user.bankAccountNumber || !user.ifscCode || !user.accountHolderName) {
-        throw new Error("Bank details missing. Please add bankAccountNumber, ifscCode, accountHolderName");
+        throw new Error("Bank details missing. Please add bankAccountNumber, ifscCode, accountHolderName in profile");
       }
     }
 
@@ -93,6 +110,11 @@ router.post("/", auth, async (req, res) => {
       if (!user.upiId) {
         throw new Error("UPI ID missing. Please add upiId in profile");
       }
+    }
+
+    const walletType = toUpper(req.body.walletType || "MAIN");
+    if (!["MAIN", "SPOT"].includes(walletType)) {
+      throw new Error("walletType must be MAIN or SPOT");
     }
 
     // Get wallet (lock row)
@@ -103,19 +125,32 @@ router.post("/", auth, async (req, res) => {
     });
     if (!wallet) throw new Error("Wallet not found");
 
-    // ✅ Check sufficient balance for gross
-    if (Number(wallet.balance) < Number(fee.gross)) {
-      throw new Error("Insufficient balance");
+    // ✅ Check sufficient balance & deduct
+    if (walletType === "SPOT") {
+      if (Number(wallet.spotBalance || 0) < Number(fee.gross)) {
+        throw new Error("Insufficient Spot Wallet balance");
+      }
+
+      const newSpotBal = round2(Number(wallet.spotBalance || 0) - Number(fee.gross));
+      const newLocked = round2(Number(wallet.lockedBalance || 0) + Number(fee.gross));
+
+      wallet.spotBalance = newSpotBal;
+      wallet.lockedBalance = newLocked;
+      wallet.totalBalance = round2(Number(wallet.balance || 0) + Number(newSpotBal) + Number(newLocked));
+      await wallet.save({ transaction: t });
+    } else {
+      if (Number(wallet.balance || 0) < Number(fee.gross)) {
+        throw new Error("Insufficient balance");
+      }
+
+      const newBal = round2(Number(wallet.balance || 0) - Number(fee.gross));
+      const newLocked = round2(Number(wallet.lockedBalance || 0) + Number(fee.gross));
+
+      wallet.balance = newBal;
+      wallet.lockedBalance = newLocked;
+      wallet.totalBalance = round2(Number(newBal) + Number(wallet.spotBalance || 0) + Number(newLocked));
+      await wallet.save({ transaction: t });
     }
-
-    // ✅ Deduct gross from balance, move gross to lockedBalance
-    const newBal = round2(Number(wallet.balance) - Number(fee.gross));
-    const newLocked = round2(Number(wallet.lockedBalance || 0) + Number(fee.gross));
-
-    wallet.balance = newBal;
-    wallet.lockedBalance = newLocked;
-    wallet.totalBalance = round2(Number(newBal) + Number(newLocked));
-    await wallet.save({ transaction: t });
 
     // prepare payout details
     const bankDetails =
@@ -144,6 +179,7 @@ router.post("/", auth, async (req, res) => {
         upiId,
 
         meta: {
+          walletType,
           userId: user.id,
           userName: user.name,
           userEmail: user.email,
@@ -184,6 +220,7 @@ router.post("/", auth, async (req, res) => {
       },
       wallet: {
         balance: wallet.balance,
+        spotBalance: wallet.spotBalance,
         lockedBalance: wallet.lockedBalance,
         totalBalance: wallet.totalBalance,
       },
@@ -363,10 +400,15 @@ router.put("/:id/action", auth, async (req, res) => {
     }
 
     // action === "REJECT"
-    // Refund: locked -> available (gross)
-    wallet.balance = round2(Number(wallet.balance) + gross);
-    wallet.lockedBalance = round2(Number(wallet.lockedBalance) - gross);
-    wallet.totalBalance = round2(Number(wallet.balance) + Number(wallet.lockedBalance));
+    // Refund: locked -> available or spot balance
+    const isSpot = (txn.meta?.walletType === "SPOT");
+    if (isSpot) {
+      wallet.spotBalance = round2(Number(wallet.spotBalance || 0) + gross);
+    } else {
+      wallet.balance = round2(Number(wallet.balance || 0) + gross);
+    }
+    wallet.lockedBalance = round2(Number(wallet.lockedBalance || 0) - gross);
+    wallet.totalBalance = round2(Number(wallet.balance || 0) + Number(wallet.spotBalance || 0) + Number(wallet.lockedBalance || 0));
     await wallet.save({ transaction: t });
 
     txn.status = "REJECTED";

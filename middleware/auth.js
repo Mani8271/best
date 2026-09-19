@@ -11,12 +11,7 @@ async function auth(req, res, next) {
     const decoded = jwt.verify(token, process.env.JWT_SECRET); // { id, iat, exp }
 
     const user = await User.findByPk(decoded.id, {
-      attributes: [
-        "id", "role", "email", "name", "userType", "profilePic", "userID",
-        "phone", "bankAccountNumber", "ifscCode", "accountHolderName",
-        "panNumber", "upiId", "gender", "dateOfBirth", "activationDate",
-        "nomineeName", "nomineeRelation", "nomineePhone"
-      ],
+      attributes: { exclude: ["password"] },
     });
 
     if (!user) return res.status(401).json({ msg: "User not found" });

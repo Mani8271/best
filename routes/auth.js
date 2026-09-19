@@ -1272,6 +1272,16 @@ router.post("/login", async (req, res) => {
   }
 });
 
+// ✅ GET /api/auth/me
+// Returns logged-in user profile details
+router.get("/me", auth, async (req, res) => {
+  try {
+    return res.json({ user: req.user });
+  } catch (err) {
+    return res.status(500).json({ msg: err.message });
+  }
+});
+
 // ✅ GET /api/auth/welcome-letter
 // Returns data for the welcome letter of the logged-in user
 router.get("/welcome-letter", auth, async (req, res) => {

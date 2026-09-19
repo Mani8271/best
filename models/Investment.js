@@ -29,6 +29,11 @@ const Investment = sequelize.define(
       allowNull: false,
       defaultValue: 0.00,
     },
+    spotBalance: {
+      type: DataTypes.DECIMAL(12, 2),
+      allowNull: false,
+      defaultValue: 0.00,
+    },
     totalWithdrawn: {
       type: DataTypes.DECIMAL(12, 2),
       allowNull: false,

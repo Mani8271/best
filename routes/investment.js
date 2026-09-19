@@ -14,6 +14,7 @@ const InvestmentBankDetail = require("../models/InvestmentBankDetail.js");
 const AppSetting = require("../models/AppSetting.js");
 const { getSettingNumber, getSettingString, updateAppSettingString } = require("../config/settings.js");
 const { processDailyPayouts } = require("../utils/dailyPayoutEngine.js");
+const { processPayoutTransfers } = require("../utils/payoutTransferEngine.js");
 
 const router = express.Router();
 
@@ -283,8 +284,9 @@ router.post("/login", async (req, res) => {
       });
     }
 
-    // Fetch Bank details saved status
+    // Fetch Bank details saved status & Wallet
     const bankDetails = await InvestmentBankDetail.findOne({ where: { userId: user.id } });
+    const userWallet = await Wallet.findOne({ where: { userId: user.id } });
 
     const token = signToken(user.id);
 
@@ -307,10 +309,11 @@ router.post("/login", async (req, res) => {
       investment: {
         totalInvested: Number(investment.totalInvested || 0),
         activeInvestment: Number(investment.activeInvestment || 0),
+        availableBalance: Number(userWallet?.balance || 0),
         roiBalance: Number(investment.roiBalance || 0),
         commissionBalance: Number(investment.commissionBalance || 0),
+        spotBalance: Number(investment.spotBalance || 0),
         totalWithdrawn: Number(investment.totalWithdrawn || 0),
-        availableBalance: Number(investment.roiBalance || 0) + Number(investment.commissionBalance || 0),
         status: investment.status,
       },
       hasSavedBankDetails: !!bankDetails,
@@ -428,6 +431,8 @@ router.get("/admin/settings", auth, isAdmin, async (req, res) => {
     const level2Percent = await getSettingNumber("INVESTMENT_LEVEL_2_PERCENT", 1.5);
     const level3Percent = await getSettingNumber("INVESTMENT_LEVEL_3_PERCENT", 1.0);
     const level4Percent = await getSettingNumber("INVESTMENT_LEVEL_4_PERCENT", 0.5);
+    const payoutTransferDay1 = await getSettingNumber("PAYOUT_TRANSFER_DAY_1", 10);
+    const payoutTransferDay2 = await getSettingNumber("PAYOUT_TRANSFER_DAY_2", 25);
 
     return res.status(200).json({
       success: true,
@@ -437,6 +442,8 @@ router.get("/admin/settings", auth, isAdmin, async (req, res) => {
         INVESTMENT_ROI_PERCENT: roiPercent,
         roiPercent,
         spotPercent,
+        payoutTransferDay1,
+        payoutTransferDay2,
         levelCommissions: {
           level1Percent,
           level2Percent,
@@ -470,7 +477,7 @@ async function updateAppSetting(key, val) {
 
 /**
  * @route   POST /api/investment/admin/settings
- * @desc    Update dynamic investment settings (Min withdrawal, ROI %, Level 1-4 Commission %).
+ * @desc    Update dynamic investment settings (Min withdrawal, ROI %, Level 1-4 Commission %, Payout Transfer Days).
  * @access  Admin / Master / Staff
  */
 router.post("/admin/settings", auth, isAdmin, async (req, res) => {
@@ -483,6 +490,10 @@ router.post("/admin/settings", auth, isAdmin, async (req, res) => {
       level2Percent,
       level3Percent,
       level4Percent,
+      payoutTransferDay1,
+      payoutTransferDay2,
+      payoutDay1,
+      payoutDay2,
     } = req.body;
 
     const targetMinWithdrawal = minWithdrawalAmount !== undefined ? minWithdrawalAmount : value;
@@ -506,12 +517,24 @@ router.post("/admin/settings", auth, isAdmin, async (req, res) => {
       await updateAppSetting("INVESTMENT_LEVEL_4_PERCENT", level4Percent);
     }
 
+    const day1Val = payoutTransferDay1 !== undefined ? payoutTransferDay1 : payoutDay1;
+    const day2Val = payoutTransferDay2 !== undefined ? payoutTransferDay2 : payoutDay2;
+
+    if (day1Val !== undefined && Number(day1Val) >= 1 && Number(day1Val) <= 28) {
+      await updateAppSetting("PAYOUT_TRANSFER_DAY_1", day1Val);
+    }
+    if (day2Val !== undefined && Number(day2Val) >= 1 && Number(day2Val) <= 28) {
+      await updateAppSetting("PAYOUT_TRANSFER_DAY_2", day2Val);
+    }
+
     const currentMinWithdrawal = await getSettingNumber("INVESTMENT_MIN_WITHDRAWAL", 2500);
     const currentRoi = await getSettingNumber("INVESTMENT_ROI_PERCENT", 5);
-    const currentL1 = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", 5);
-    const currentL2 = await getSettingNumber("INVESTMENT_LEVEL_2_PERCENT", 1);
-    const currentL3 = await getSettingNumber("INVESTMENT_LEVEL_3_PERCENT", 0.5);
-    const currentL4 = await getSettingNumber("INVESTMENT_LEVEL_4_PERCENT", 0.25);
+    const currentL1 = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", 2);
+    const currentL2 = await getSettingNumber("INVESTMENT_LEVEL_2_PERCENT", 1.5);
+    const currentL3 = await getSettingNumber("INVESTMENT_LEVEL_3_PERCENT", 1.0);
+    const currentL4 = await getSettingNumber("INVESTMENT_LEVEL_4_PERCENT", 0.5);
+    const currentDay1 = await getSettingNumber("PAYOUT_TRANSFER_DAY_1", 10);
+    const currentDay2 = await getSettingNumber("PAYOUT_TRANSFER_DAY_2", 25);
 
     return res.status(200).json({
       success: true,
@@ -519,6 +542,8 @@ router.post("/admin/settings", auth, isAdmin, async (req, res) => {
       settings: {
         minWithdrawalAmount: currentMinWithdrawal,
         roiPercent: currentRoi,
+        payoutTransferDay1: currentDay1,
+        payoutTransferDay2: currentDay2,
         levelCommissions: {
           level1Percent: currentL1,
           level2Percent: currentL2,
@@ -548,6 +573,10 @@ router.put("/admin/settings", auth, isAdmin, async (req, res) => {
       level2Percent,
       level3Percent,
       level4Percent,
+      payoutTransferDay1,
+      payoutTransferDay2,
+      payoutDay1,
+      payoutDay2,
     } = req.body;
 
     const targetMinWithdrawal = minWithdrawalAmount !== undefined ? minWithdrawalAmount : value;
@@ -571,12 +600,24 @@ router.put("/admin/settings", auth, isAdmin, async (req, res) => {
       await updateAppSetting("INVESTMENT_LEVEL_4_PERCENT", level4Percent);
     }
 
+    const day1Val = payoutTransferDay1 !== undefined ? payoutTransferDay1 : payoutDay1;
+    const day2Val = payoutTransferDay2 !== undefined ? payoutTransferDay2 : payoutDay2;
+
+    if (day1Val !== undefined && Number(day1Val) >= 1 && Number(day1Val) <= 28) {
+      await updateAppSetting("PAYOUT_TRANSFER_DAY_1", day1Val);
+    }
+    if (day2Val !== undefined && Number(day2Val) >= 1 && Number(day2Val) <= 28) {
+      await updateAppSetting("PAYOUT_TRANSFER_DAY_2", day2Val);
+    }
+
     const currentMinWithdrawal = await getSettingNumber("INVESTMENT_MIN_WITHDRAWAL", 2500);
     const currentRoi = await getSettingNumber("INVESTMENT_ROI_PERCENT", 5);
-    const currentL1 = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", 5);
-    const currentL2 = await getSettingNumber("INVESTMENT_LEVEL_2_PERCENT", 1);
-    const currentL3 = await getSettingNumber("INVESTMENT_LEVEL_3_PERCENT", 0.5);
-    const currentL4 = await getSettingNumber("INVESTMENT_LEVEL_4_PERCENT", 0.25);
+    const currentL1 = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", 2);
+    const currentL2 = await getSettingNumber("INVESTMENT_LEVEL_2_PERCENT", 1.5);
+    const currentL3 = await getSettingNumber("INVESTMENT_LEVEL_3_PERCENT", 1.0);
+    const currentL4 = await getSettingNumber("INVESTMENT_LEVEL_4_PERCENT", 0.5);
+    const currentDay1 = await getSettingNumber("PAYOUT_TRANSFER_DAY_1", 10);
+    const currentDay2 = await getSettingNumber("PAYOUT_TRANSFER_DAY_2", 25);
 
     return res.status(200).json({
       success: true,
@@ -584,6 +625,8 @@ router.put("/admin/settings", auth, isAdmin, async (req, res) => {
       settings: {
         minWithdrawalAmount: currentMinWithdrawal,
         roiPercent: currentRoi,
+        payoutTransferDay1: currentDay1,
+        payoutTransferDay2: currentDay2,
         levelCommissions: {
           level1Percent: currentL1,
           level2Percent: currentL2,
@@ -595,6 +638,24 @@ router.put("/admin/settings", auth, isAdmin, async (req, res) => {
   } catch (err) {
     console.error("Update Investment Admin Settings Error:", err);
     return res.status(500).json({ msg: "Failed to update admin settings", error: err.message });
+  }
+});
+
+/**
+ * @route   POST /api/investment/admin/trigger-payout-transfer
+ * @desc    Manually trigger bi-monthly payout transfer engine on demand
+ * @access  Admin / Master / Staff
+ */
+router.post("/admin/trigger-payout-transfer", auth, isAdmin, async (req, res) => {
+  try {
+    const result = await processPayoutTransfers();
+    return res.status(200).json({
+      msg: "Scheduled payout transfer executed successfully",
+      result,
+    });
+  } catch (err) {
+    console.error("Trigger Payout Transfer Error:", err);
+    return res.status(500).json({ msg: "Failed to trigger payout transfers", error: err.message });
   }
 });
 
@@ -703,6 +764,7 @@ router.post("/admin/topup", auth, isAdmin, async (req, res) => {
         if (sponsor) {
           const commAmount = Number((numAmount * rate).toFixed(2));
 
+          // 1. Credit Sponsor Investment.spotBalance
           let [sponsorInvestment] = await Investment.findOrCreate({
             where: { userId: sponsor.id },
             defaults: {
@@ -710,6 +772,7 @@ router.post("/admin/topup", auth, isAdmin, async (req, res) => {
               activeInvestment: 0,
               roiBalance: 0,
               commissionBalance: 0,
+              spotBalance: 0,
               totalWithdrawn: 0,
               status: "ACTIVE",
             },
@@ -717,9 +780,28 @@ router.post("/admin/topup", auth, isAdmin, async (req, res) => {
             lock: t.LOCK.UPDATE,
           });
 
+          sponsorInvestment.spotBalance = Number(sponsorInvestment.spotBalance || 0) + commAmount;
           sponsorInvestment.commissionBalance = Number(sponsorInvestment.commissionBalance || 0) + commAmount;
           await sponsorInvestment.save({ transaction: t });
 
+          // 2. Credit Sponsor Wallet.spotBalance
+          let sponsorWallet = await Wallet.findOne({
+            where: { userId: sponsor.id },
+            transaction: t,
+            lock: t.LOCK.UPDATE,
+          });
+
+          if (!sponsorWallet) {
+            sponsorWallet = await Wallet.create(
+              { userId: sponsor.id, balance: 0, spotBalance: 0, lockedBalance: 0, totalBalance: 0 },
+              { transaction: t }
+            );
+          }
+
+          sponsorWallet.spotBalance = Math.round((Number(sponsorWallet.spotBalance || 0) + commAmount + Number.EPSILON) * 100) / 100;
+          await sponsorWallet.save({ transaction: t });
+
+          // 3. Log InvestmentTransaction
           await InvestmentTransaction.create(
             {
               userId: sponsor.id,
@@ -728,9 +810,10 @@ router.post("/admin/topup", auth, isAdmin, async (req, res) => {
               level: 1,
               fromUserId: targetUser.id,
               createdAdminId: req.user.id,
-              description: `Direct Referral Commission (${rate * 100}%) from ${targetUser.name} (${targetUser.userID}) investment of ₹${numAmount.toLocaleString("en-IN")}`,
+              description: `Direct Spot Referral Commission (${rate * 100}%) from ${targetUser.name} (${targetUser.userID}) investment of ₹${numAmount.toLocaleString("en-IN")}`,
               meta: {
                 level: 1,
+                isSpotCommission: true,
                 ratePercentage: rate * 100,
                 investmentAmount: numAmount,
                 investorUserId: targetUser.userID,

@@ -230,7 +230,9 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
           ('INVESTMENT_LEVEL_1_PERCENT', '2', NOW(), NOW()),
           ('INVESTMENT_LEVEL_2_PERCENT', '1.5', NOW(), NOW()),
           ('INVESTMENT_LEVEL_3_PERCENT', '1', NOW(), NOW()),
-          ('INVESTMENT_LEVEL_4_PERCENT', '0.5', NOW(), NOW())
+          ('INVESTMENT_LEVEL_4_PERCENT', '0.5', NOW(), NOW()),
+          ('PAYOUT_TRANSFER_DAY_1', '10', NOW(), NOW()),
+          ('PAYOUT_TRANSFER_DAY_2', '25', NOW(), NOW())
         ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`), updatedAt = NOW();
       `);
 
@@ -268,6 +270,8 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
     // Schedule Daily ROI & Daily Level Commission cron job (runs every day at Midnight 00:00 AM IST)
     const cron = require("node-cron");
     const { processDailyPayouts } = require("./utils/dailyPayoutEngine.js");
+    const { processPayoutTransfers } = require("./utils/payoutTransferEngine.js");
+    const { getSettingNumber } = require("./config/settings.js");
 
     cron.schedule(
       "0 0 * * *",
@@ -277,6 +281,22 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
           await processDailyPayouts();
         } catch (err) {
           console.error("❌ [Cron] Error running daily payouts:", err);
+        }
+
+        // Check if today matches Bi-Monthly Payout Transfer Day (e.g. 10th or 25th)
+        try {
+          const nowStr = new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
+          const todayDateNum = new Date(nowStr).getDate();
+
+          const day1 = await getSettingNumber("PAYOUT_TRANSFER_DAY_1", 10);
+          const day2 = await getSettingNumber("PAYOUT_TRANSFER_DAY_2", 25);
+
+          if (todayDateNum === day1 || todayDateNum === day2) {
+            console.log(`⏰ [Cron] Today (${todayDateNum}) matches payout transfer date (Day ${day1} / Day ${day2}). Executing payout transfers...`);
+            await processPayoutTransfers();
+          }
+        } catch (err) {
+          console.error("❌ [Cron] Error checking/running scheduled payout transfers:", err);
         }
       },
       { timezone: "Asia/Kolkata" }

@@ -11,6 +11,11 @@ const Wallet = sequelize.define(
       allowNull: false,
       defaultValue: 0,
     },
+    spotBalance: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 0,
+    },
     lockedBalance: {
       type: DataTypes.DECIMAL(10, 2),
       allowNull: false,

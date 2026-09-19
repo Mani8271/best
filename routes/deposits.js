@@ -328,6 +328,7 @@ router.put("/:id/action", auth, isAdmin, async (req, res) => {
             if (sponsor) {
               const commAmount = Number((depositAmount * rate).toFixed(2));
 
+              // 1. Credit Sponsor Investment.spotBalance
               let [sponsorInvestment] = await Investment.findOrCreate({
                 where: { userId: sponsor.id },
                 defaults: {
@@ -335,6 +336,7 @@ router.put("/:id/action", auth, isAdmin, async (req, res) => {
                   activeInvestment: 0,
                   roiBalance: 0,
                   commissionBalance: 0,
+                  spotBalance: 0,
                   totalWithdrawn: 0,
                   status: "ACTIVE",
                 },
@@ -342,9 +344,28 @@ router.put("/:id/action", auth, isAdmin, async (req, res) => {
                 lock: t.LOCK.UPDATE,
               });
 
+              sponsorInvestment.spotBalance = Number(sponsorInvestment.spotBalance || 0) + commAmount;
               sponsorInvestment.commissionBalance = Number(sponsorInvestment.commissionBalance || 0) + commAmount;
               await sponsorInvestment.save({ transaction: t });
 
+              // 2. Credit Sponsor Wallet.spotBalance
+              let sponsorWallet = await Wallet.findOne({
+                where: { userId: sponsor.id },
+                transaction: t,
+                lock: t.LOCK.UPDATE,
+              });
+
+              if (!sponsorWallet) {
+                sponsorWallet = await Wallet.create(
+                  { userId: sponsor.id, balance: 0, spotBalance: 0, lockedBalance: 0, totalBalance: 0 },
+                  { transaction: t }
+                );
+              }
+
+              sponsorWallet.spotBalance = Math.round((Number(sponsorWallet.spotBalance || 0) + commAmount + Number.EPSILON) * 100) / 100;
+              await sponsorWallet.save({ transaction: t });
+
+              // 3. Log InvestmentTransaction
               await InvestmentTransaction.create(
                 {
                   userId: sponsor.id,
@@ -353,11 +374,30 @@ router.put("/:id/action", auth, isAdmin, async (req, res) => {
                   level: 1,
                   fromUserId: targetUser.id,
                   createdAdminId: adminId,
-                  description: `Direct Referral Commission (${rate * 100}%) from ${targetUser.name} (${targetUser.userID || targetUser.id}) deposit of ₹${depositAmount.toLocaleString("en-IN")}`,
+                  description: `Direct Spot Referral Commission (${rate * 100}%) from ${targetUser.name} (${targetUser.userID || targetUser.id}) deposit of ₹${depositAmount.toLocaleString("en-IN")}`,
                   meta: {
                     level: 1,
+                    isSpotCommission: true,
                     ratePercentage: rate * 100,
                     investmentAmount: depositAmount,
+                    depositRequestId: deposit.id,
+                    investorUserId: targetUser.userID || targetUser.id,
+                    investorName: targetUser.name,
+                  },
+                },
+                { transaction: t }
+              );
+
+              // 4. Log WalletTransaction
+              await WalletTransaction.create(
+                {
+                  walletId: sponsorWallet.id,
+                  type: "CREDIT",
+                  amount: commAmount,
+                  reason: "TOPUP",
+                  status: "APPROVED",
+                  meta: {
+                    isSpotCommission: true,
                     depositRequestId: deposit.id,
                     investorUserId: targetUser.userID || targetUser.id,
                     investorName: targetUser.name,

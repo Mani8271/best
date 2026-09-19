@@ -103,14 +103,17 @@ router.get("/", auth, async (req, res) => {
 
 
     const availableBalance = Number(wallet.balance || 0);
+    const spotBalance = Number(wallet.spotBalance || 0);
 
     return res.json({
       id: wallet.id,
       userId: wallet.userId,
       balance: availableBalance,            // ✅ usable
+      availableBalance: availableBalance,   // ✅ Available Main Balance (10th & 25th transfer money)
+      spotBalance,                          // ✅ dedicated spot wallet balance
       lockedBalance,                        // ✅ pending
       totalEarned,                          // ✅ Total Earnings (Bonuses)
-      totalBalance: availableBalance + lockedBalance, // ✅ show only
+      totalBalance: availableBalance + spotBalance + lockedBalance, // ✅ show only
       totalSpent: Number(wallet.totalSpent || 0),
       isUnlocked: !!wallet.isUnlocked,
       createdAt: wallet.createdAt,
