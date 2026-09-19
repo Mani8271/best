@@ -67,6 +67,11 @@ const InvestmentBankDetail = require("./models/InvestmentBankDetail.js");
 const investmentRoutes = require("./routes/investment.js");
 const DepositRequest = require("./models/DepositRequest.js");
 const depositRoutes = require("./routes/deposits.js");
+const AdminUpiDetail = require("./models/AdminUpiDetail.js");
+const AdminBankDetail = require("./models/AdminBankDetail.js");
+const adminPaymentDetailsRoutes = require("./routes/adminPaymentDetails.js");
+const adminUpiRoutes = require("./routes/adminUpi.js");
+const adminBankRoutes = require("./routes/adminBank.js");
 
 const app = express()
 
@@ -101,6 +106,9 @@ app.use("/api/settings", settingsRoutes);
 app.use("/api/pairs", pairsRoutes);
 app.use("/api/withdrawals", withdrawalRoutes);
 app.use("/api/deposits", depositRoutes);
+app.use("/api/admin-payment-details", adminPaymentDetailsRoutes);
+app.use("/api/admin-upi", adminUpiRoutes);
+app.use("/api/admin-bank", adminBankRoutes);
 app.use("/api/reports", reportsRoutes);
 app.use("/api/awards", awardsRoutes);
 

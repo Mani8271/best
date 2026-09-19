@@ -27,8 +27,9 @@ const subCategoryDir = path.join(ROOT, "subcategories");
 const bannerDir = path.join(ROOT, "banners");
 const depositDir = path.join(ROOT, "deposits");
 const kycDir = path.join(ROOT, "kyc");
+const qrDir = path.join(ROOT, "qrcodes");
 
-[productDir, profileDir, categoryDir, subCategoryDir, bannerDir, kycDir, depositDir].forEach(ensureDir);
+[productDir, profileDir, categoryDir, subCategoryDir, bannerDir, kycDir, depositDir, qrDir].forEach(ensureDir);
 
 const allowed = new Set(["image/jpeg", "image/png", "image/webp"]);
 
@@ -87,6 +88,12 @@ const uploadDepositProof = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
 }).single("proofPic");
 
+const uploadQrCode = multer({
+  storage: makeStorage(qrDir),
+  fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 },
+}).single("qrCode");
+
 const uploadUserDocs = multer({
   storage: makeStorage(kycDir),
   fileFilter,
@@ -107,5 +114,6 @@ module.exports = {
   uploadSubCategoryImage,
   uploadBannerImage,
   uploadDepositProof,
+  uploadQrCode,
   uploadUserDocs,
 };
