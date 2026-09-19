@@ -44,14 +44,10 @@ router.post("/", auth, async (req, res) => {
     const userId = req.user.id;
 
     const amount = toNum(req.body.amount);
-    const payoutMethod = toUpper(req.body.payoutMethod); // BANK / UPI
+    let payoutMethod = toUpper(req.body.payoutMethod); // BANK / UPI (optional)
 
     if (!amount || Number.isNaN(amount) || amount <= 0) {
       throw new Error("Invalid withdrawal amount");
-    }
-
-    if (!["BANK", "UPI"].includes(payoutMethod)) {
-      throw new Error("payoutMethod must be BANK or UPI");
     }
 
     // ✅ MIN / MAX from settings
@@ -81,8 +77,6 @@ router.post("/", auth, async (req, res) => {
     // Get user details
     const user = await User.findByPk(userId, { transaction: t, lock: t.LOCK.UPDATE });
     if (!user) throw new Error("User not found");
-
-    let payoutMethod = toUpper(req.body.payoutMethod);
 
     // Auto-detect payoutMethod if not passed in request body
     if (!payoutMethod) {
