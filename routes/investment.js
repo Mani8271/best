@@ -7,6 +7,7 @@ const auth = require("../middleware/auth.js");
 const isAdmin = require("../middleware/isAdmin.js");
 
 const User = require("../models/User.js");
+const Wallet = require("../models/Wallet.js");
 const Investment = require("../models/Investment.js");
 const InvestmentTransaction = require("../models/InvestmentTransaction.js");
 const InvestmentWithdrawal = require("../models/InvestmentWithdrawal.js");
