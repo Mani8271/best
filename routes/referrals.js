@@ -27,7 +27,7 @@ router.get("/", auth, async (req, res) => {
     const isInvestment = req.user.userType === "INVESTMENT_USER" || req.query.type === "investment";
     if (isInvestment) {
       const refCode = req.user.referralCode || req.user.userID;
-      const url = `https://mysun.in/investment-register?ref=${refCode}`;
+      const url = `https://investment.mysun.in/investment-register?ref=${refCode}`;
       return res.json([
         {
           id: req.user.id,

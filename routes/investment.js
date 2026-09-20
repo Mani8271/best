@@ -887,7 +887,7 @@ router.get("/referral-info", auth, async (req, res) => {
     });
 
     const refCode = user.referralCode || user.userID;
-    const referralUrl = `https://mysun.in/investment-register?ref=${refCode}`;
+    const referralUrl = `https://investment.mysun.in/investment-register?ref=${refCode}`;
 
     return res.status(200).json({
       success: true,
@@ -918,7 +918,7 @@ router.get("/referral-link", auth, async (req, res) => {
     });
 
     const refCode = user.referralCode || user.userID;
-    const referralUrl = `https://mysun.in/investment-register?ref=${refCode}`;
+    const referralUrl = `https://investment.mysun.in/investment-register?ref=${refCode}`;
 
     return res.status(200).json({
       success: true,
