@@ -570,10 +570,10 @@ router.post("/admin/settings", auth, isAdmin, async (req, res) => {
     const day1Val = payoutTransferDay1 !== undefined ? payoutTransferDay1 : payoutDay1;
     const day2Val = payoutTransferDay2 !== undefined ? payoutTransferDay2 : payoutDay2;
 
-    if (day1Val !== undefined && Number(day1Val) >= 1 && Number(day1Val) <= 28) {
+    if (day1Val !== undefined && Number(day1Val) >= 1 && Number(day1Val) <= 31) {
       await updateAppSetting("PAYOUT_TRANSFER_DAY_1", day1Val);
     }
-    if (day2Val !== undefined && Number(day2Val) >= 1 && Number(day2Val) <= 28) {
+    if (day2Val !== undefined && Number(day2Val) >= 1 && Number(day2Val) <= 31) {
       await updateAppSetting("PAYOUT_TRANSFER_DAY_2", day2Val);
     }
 
@@ -2025,6 +2025,25 @@ router.post("/admin/cleanup-duplicate-payouts", auth, isAdmin, async (req, res) 
     await t.rollback();
     console.error("Cleanup Duplicate Payouts Error:", err);
     return res.status(500).json({ msg: "Failed to cleanup duplicate payouts", error: err.message });
+  }
+});
+
+/**
+ * @route   POST /api/investment/admin/trigger-payout-transfer
+ * @desc    Manually trigger bi-monthly payout transfer (transfers ROI & Level Commission to main Available Wallet balance).
+ * @access  Admin / Master / Staff
+ */
+router.post("/admin/trigger-payout-transfer", auth, isAdmin, async (req, res) => {
+  try {
+    const result = await processPayoutTransfers();
+    return res.status(200).json({
+      success: true,
+      msg: `Bi-Monthly Payout Transfer completed successfully for ${result.date}`,
+      summary: result,
+    });
+  } catch (err) {
+    console.error("Admin Trigger Payout Transfer Error:", err);
+    return res.status(500).json({ msg: "Failed to process payout transfer", error: err.message });
   }
 });
 
