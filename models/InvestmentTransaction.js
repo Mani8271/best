@@ -9,7 +9,7 @@ const InvestmentTransaction = sequelize.define(
       allowNull: false,
     },
     type: {
-      type: DataTypes.ENUM("DEPOSIT", "MONTHLY_ROI", "LEVEL_COMMISSION", "WITHDRAWAL"),
+      type: DataTypes.STRING(50),
       allowNull: false,
     },
     amount: {

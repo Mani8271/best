@@ -1862,4 +1862,121 @@ router.post("/admin/trigger-daily-payout", auth, isAdmin, async (req, res) => {
   }
 });
 
+/**
+ * @route   POST /api/investment/admin/cleanup-duplicate-payouts
+ * @desc    Find and clean up duplicate Daily ROI and Level Commission transactions & adjust balances.
+ * @access  Admin / Master / Staff
+ */
+router.post("/admin/cleanup-duplicate-payouts", auth, isAdmin, async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    // 1. Find duplicate Daily ROI transactions (keep oldest ID)
+    const [dupRoiRows] = await sequelize.query(
+      `SELECT t1.id, t1.userId, t1.amount
+       FROM InvestmentTransactions t1
+       JOIN InvestmentTransactions t2 
+         ON t1.userId = t2.userId 
+         AND DATE(t1.createdAt) = DATE(t2.createdAt)
+         AND t1.description LIKE 'Daily ROI payout%'
+         AND t2.description LIKE 'Daily ROI payout%'
+         AND t1.id > t2.id`,
+      { transaction: t }
+    );
+
+    // 2. Find duplicate Level Commission transactions (keep oldest ID)
+    const [dupCommRows] = await sequelize.query(
+      `SELECT t1.id, t1.userId, t1.amount
+       FROM InvestmentTransactions t1
+       JOIN InvestmentTransactions t2 
+         ON t1.userId = t2.userId 
+         AND t1.fromUserId = t2.fromUserId
+         AND t1.level = t2.level
+         AND DATE(t1.createdAt) = DATE(t2.createdAt)
+         AND t1.description LIKE 'Level % Daily Commission%'
+         AND t2.description LIKE 'Level % Daily Commission%'
+         AND t1.id > t2.id`,
+      { transaction: t }
+    );
+
+    const dupRoiIds = dupRoiRows.map((r) => r.id);
+    const dupCommIds = dupCommRows.map((r) => r.id);
+
+    let totalRoiDeducted = 0;
+    let totalCommDeducted = 0;
+
+    // Deduct excess ROI balances
+    if (dupRoiIds.length > 0) {
+      await sequelize.query(
+        `UPDATE Investments i
+         JOIN (
+           SELECT t1.userId, SUM(t1.amount) AS excess_roi
+           FROM InvestmentTransactions t1
+           JOIN InvestmentTransactions t2 
+             ON t1.userId = t2.userId 
+             AND DATE(t1.createdAt) = DATE(t2.createdAt)
+             AND t1.description LIKE 'Daily ROI payout%'
+             AND t2.description LIKE 'Daily ROI payout%'
+             AND t1.id > t2.id
+           GROUP BY t1.userId
+         ) dup ON i.userId = dup.userId
+         SET i.roiBalance = GREATEST(0, i.roiBalance - dup.excess_roi)`,
+        { transaction: t }
+      );
+      totalRoiDeducted = dupRoiRows.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+
+      // Delete duplicate ROI transactions
+      await sequelize.query(
+        `DELETE FROM InvestmentTransactions WHERE id IN (:ids)`,
+        { replacements: { ids: dupRoiIds }, transaction: t }
+      );
+    }
+
+    // Deduct excess Commission balances
+    if (dupCommIds.length > 0) {
+      await sequelize.query(
+        `UPDATE Investments i
+         JOIN (
+           SELECT t1.userId, SUM(t1.amount) AS excess_comm
+           FROM InvestmentTransactions t1
+           JOIN InvestmentTransactions t2 
+             ON t1.userId = t2.userId 
+             AND t1.fromUserId = t2.fromUserId
+             AND t1.level = t2.level
+             AND DATE(t1.createdAt) = DATE(t2.createdAt)
+             AND t1.description LIKE 'Level % Daily Commission%'
+             AND t2.description LIKE 'Level % Daily Commission%'
+             AND t1.id > t2.id
+           GROUP BY t1.userId
+         ) dup ON i.userId = dup.userId
+         SET i.commissionBalance = GREATEST(0, i.commissionBalance - dup.excess_comm)`,
+        { transaction: t }
+      );
+      totalCommDeducted = dupCommRows.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+
+      // Delete duplicate Commission transactions
+      await sequelize.query(
+        `DELETE FROM InvestmentTransactions WHERE id IN (:ids)`,
+        { replacements: { ids: dupCommIds }, transaction: t }
+      );
+    }
+
+    await t.commit();
+
+    return res.status(200).json({
+      success: true,
+      msg: `Duplicate payout cleanup completed successfully!`,
+      summary: {
+        deletedRoiTransactions: dupRoiIds.length,
+        totalRoiDeducted: Number(totalRoiDeducted.toFixed(2)),
+        deletedCommTransactions: dupCommIds.length,
+        totalCommDeducted: Number(totalCommDeducted.toFixed(2)),
+      },
+    });
+  } catch (err) {
+    await t.rollback();
+    console.error("Cleanup Duplicate Payouts Error:", err);
+    return res.status(500).json({ msg: "Failed to cleanup duplicate payouts", error: err.message });
+  }
+});
+
 module.exports = router;
