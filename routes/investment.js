@@ -330,21 +330,25 @@ router.post("/login", async (req, res) => {
  * Helper function to build 4-level downline tree for any root user
  */
 async function build4LevelTree(rootUserId) {
-  const investmentInclude = [
+  const userInclude = [
     {
       model: Investment,
       required: false, // Include all downline users even if investment wallet is not yet initialized
       attributes: ["totalInvested", "activeInvestment", "status"],
+    },
+    {
+      model: User,
+      as: "sponsor",
+      attributes: ["id", "name", "userID", "email", "phone", "referralCode"],
     },
   ];
 
   // Level 1
   const level1Users = await User.findAll({
     where: { sponsorId: rootUserId },
-    attributes: ["id", "name", "userID", "email", "phone", "createdAt", "sponsorId"],
-    include: investmentInclude,
+    attributes: ["id", "name", "userID", "email", "phone", "createdAt", "sponsorId", "referralCode"],
+    include: userInclude,
   });
-
   const level1Ids = level1Users.map((u) => u.id);
 
   // Level 2
@@ -352,8 +356,8 @@ async function build4LevelTree(rootUserId) {
   if (level1Ids.length > 0) {
     level2Users = await User.findAll({
       where: { sponsorId: { [Op.in]: level1Ids } },
-      attributes: ["id", "name", "userID", "email", "phone", "createdAt", "sponsorId"],
-      include: investmentInclude,
+      attributes: ["id", "name", "userID", "email", "phone", "createdAt", "sponsorId", "referralCode"],
+      include: userInclude,
     });
   }
   const level2Ids = level2Users.map((u) => u.id);
@@ -363,8 +367,8 @@ async function build4LevelTree(rootUserId) {
   if (level2Ids.length > 0) {
     level3Users = await User.findAll({
       where: { sponsorId: { [Op.in]: level2Ids } },
-      attributes: ["id", "name", "userID", "email", "phone", "createdAt", "sponsorId"],
-      include: investmentInclude,
+      attributes: ["id", "name", "userID", "email", "phone", "createdAt", "sponsorId", "referralCode"],
+      include: userInclude,
     });
   }
   const level3Ids = level3Users.map((u) => u.id);
@@ -374,13 +378,57 @@ async function build4LevelTree(rootUserId) {
   if (level3Ids.length > 0) {
     level4Users = await User.findAll({
       where: { sponsorId: { [Op.in]: level3Ids } },
-      attributes: ["id", "name", "userID", "email", "phone", "createdAt", "sponsorId"],
-      include: investmentInclude,
+      attributes: ["id", "name", "userID", "email", "phone", "createdAt", "sponsorId", "referralCode"],
+      include: userInclude,
     });
   }
 
+  // Format user object with referredBy / sponsor details
+  const formatUser = (u) => {
+    const raw = u.toJSON ? u.toJSON() : u;
+    return {
+      ...raw,
+      referredBy: raw.sponsor || null,
+      sponsor: raw.sponsor || null,
+    };
+  };
 
-  const allDownlineUsers = [...level1Users, ...level2Users, ...level3Users, ...level4Users];
+  const formattedLevel1 = level1Users.map(formatUser);
+  const formattedLevel2 = level2Users.map(formatUser);
+  const formattedLevel3 = level3Users.map(formatUser);
+  const formattedLevel4 = level4Users.map(formatUser);
+
+  // Build Nested Hierarchical Tree (Level 1 -> Level 2 -> Level 3 -> Level 4)
+  const level4Map = {};
+  formattedLevel4.forEach((u) => {
+    if (!level4Map[u.sponsorId]) level4Map[u.sponsorId] = [];
+    level4Map[u.sponsorId].push({ ...u, referrals: [] });
+  });
+
+  const level3Map = {};
+  formattedLevel3.forEach((u) => {
+    if (!level3Map[u.sponsorId]) level3Map[u.sponsorId] = [];
+    level3Map[u.sponsorId].push({
+      ...u,
+      referrals: level4Map[u.id] || [],
+    });
+  });
+
+  const level2Map = {};
+  formattedLevel2.forEach((u) => {
+    if (!level2Map[u.sponsorId]) level2Map[u.sponsorId] = [];
+    level2Map[u.sponsorId].push({
+      ...u,
+      referrals: level3Map[u.id] || [],
+    });
+  });
+
+  const nestedTree = formattedLevel1.map((u) => ({
+    ...u,
+    referrals: level2Map[u.id] || [],
+  }));
+
+  const allDownlineUsers = [...formattedLevel1, ...formattedLevel2, ...formattedLevel3, ...formattedLevel4];
   const totalDownlines = allDownlineUsers.length;
 
   let totalActiveInvestment = 0;
@@ -396,21 +444,22 @@ async function build4LevelTree(rootUserId) {
   return {
     summary: {
       totalDownlines,
-      totalActiveInvestment,
-      totalInvested,
+      totalActiveInvestment: Number(totalActiveInvestment.toFixed(2)),
+      totalInvested: Number(totalInvested.toFixed(2)),
       levelCounts: {
-        level1: level1Users.length,
-        level2: level2Users.length,
-        level3: level3Users.length,
-        level4: level4Users.length,
+        level1: formattedLevel1.length,
+        level2: formattedLevel2.length,
+        level3: formattedLevel3.length,
+        level4: formattedLevel4.length,
       },
     },
     tree: {
-      level1: level1Users,
-      level2: level2Users,
-      level3: level3Users,
-      level4: level4Users,
+      level1: formattedLevel1,
+      level2: formattedLevel2,
+      level3: formattedLevel3,
+      level4: formattedLevel4,
     },
+    nestedTree,
   };
 }
 
