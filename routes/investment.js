@@ -23,14 +23,14 @@ const signToken = (id) =>
   jwt.sign({ id }, process.env.JWT_SECRET || "default_secret_key", { expiresIn: "7d" });
 
 /**
- * Generate unique SI-prefixed User ID / Referral Code (e.g., SI566665)
+ * Generate unique SD-prefixed User ID / Referral Code (e.g., SD566665)
  */
 const generateInvestmentUserID = async (t) => {
   let isUnique = false;
   let newID = "";
   while (!isUnique) {
     const num = Math.floor(100000 + Math.random() * 900000); // 6 digits
-    newID = `SI${num}`; // e.g. SI566665
+    newID = `SD${num}`; // e.g. SD566665
     const existingUser = await User.findOne({
       where: {
         [Op.or]: [{ userID: newID }, { referralCode: newID }],
