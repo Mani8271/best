@@ -210,6 +210,8 @@ router.post("/register", async (req, res) => {
         activeInvestment: Number(investment.activeInvestment || 0),
         roiBalance: Number(investment.roiBalance || 0),
         commissionBalance: Number(investment.commissionBalance || 0),
+        spotBalance: Number(investment.spotBalance || 0),
+        referralBalance: Number(investment.spotBalance || 0),
         availableBalance: Number(investment.roiBalance || 0) + Number(investment.commissionBalance || 0),
         status: investment.status,
       },
@@ -314,6 +316,7 @@ router.post("/login", async (req, res) => {
         roiBalance: Number(investment.roiBalance || 0),
         commissionBalance: Number(investment.commissionBalance || 0),
         spotBalance: Number(investment.spotBalance || 0),
+        referralBalance: Number(investment.spotBalance || 0),
         totalWithdrawn: Number(investment.totalWithdrawn || 0),
         status: investment.status,
       },
@@ -1204,6 +1207,8 @@ router.get("/my-wallet", auth, async (req, res) => {
 
     const roiBalance = Number(investment.roiBalance || 0);
     const commissionBalance = Number(investment.commissionBalance || 0);
+    const spotBalance = Number(investment.spotBalance || 0);
+    const referralBalance = spotBalance;
     const availableBalance = roiBalance + commissionBalance;
 
     const recentTransactions = await InvestmentTransaction.findAll({
@@ -1229,6 +1234,8 @@ router.get("/my-wallet", auth, async (req, res) => {
         activeInvestment: Number(investment.activeInvestment || 0),
         roiBalance,
         commissionBalance,
+        spotBalance,
+        referralBalance,
         totalWithdrawn: Number(investment.totalWithdrawn || 0),
         availableBalance,
         minWithdrawalAmount,
