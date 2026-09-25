@@ -1203,13 +1203,16 @@ router.get("/my-wallet", auth, async (req, res) => {
       where: { userId },
     });
 
+    const userWallet = await Wallet.findOne({ where: { userId } });
+
     const minWithdrawalAmount = await getSettingNumber("INVESTMENT_MIN_WITHDRAWAL", 2500);
 
     const roiBalance = Number(investment.roiBalance || 0);
     const commissionBalance = Number(investment.commissionBalance || 0);
     const spotBalance = Number(investment.spotBalance || 0);
     const referralBalance = spotBalance;
-    const availableBalance = roiBalance + commissionBalance;
+    const walletBalance = Number(userWallet?.balance || 0);
+    const availableBalance = roiBalance + commissionBalance + walletBalance;
 
     const recentTransactions = await InvestmentTransaction.findAll({
       where: { userId },
@@ -1517,9 +1520,16 @@ router.post("/withdraw/request", auth, async (req, res) => {
       return res.status(400).json({ msg: "No active investment wallet found" });
     }
 
+    let wallet = await Wallet.findOne({
+      where: { userId },
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+
     const currentRoi = Number(investment.roiBalance || 0);
     const currentComm = Number(investment.commissionBalance || 0);
-    const totalAvailable = currentRoi + currentComm;
+    const currentWalletBal = Number(wallet?.balance || 0);
+    const totalAvailable = currentRoi + currentComm + currentWalletBal;
 
     if (numAmount > totalAvailable) {
       await t.rollback();
@@ -1528,7 +1538,7 @@ router.post("/withdraw/request", auth, async (req, res) => {
       });
     }
 
-    // 2. Deduct amount from balances (prioritize ROI balance then commission balance)
+    // 2. Deduct amount from balances (prioritize ROI balance -> commission balance -> wallet balance)
     let remainingToDeduct = numAmount;
     if (currentRoi >= remainingToDeduct) {
       investment.roiBalance = currentRoi - remainingToDeduct;
@@ -1536,7 +1546,17 @@ router.post("/withdraw/request", auth, async (req, res) => {
     } else {
       investment.roiBalance = 0;
       remainingToDeduct -= currentRoi;
-      investment.commissionBalance = currentComm - remainingToDeduct;
+      if (currentComm >= remainingToDeduct) {
+        investment.commissionBalance = currentComm - remainingToDeduct;
+        remainingToDeduct = 0;
+      } else {
+        investment.commissionBalance = 0;
+        remainingToDeduct -= currentComm;
+        if (wallet) {
+          wallet.balance = Math.max(0, currentWalletBal - remainingToDeduct);
+          await wallet.save({ transaction: t });
+        }
+      }
     }
 
     await investment.save({ transaction: t });
