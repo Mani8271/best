@@ -73,6 +73,7 @@ const adminPaymentDetailsRoutes = require("./routes/adminPaymentDetails.js");
 const adminUpiRoutes = require("./routes/adminUpi.js");
 const adminBankRoutes = require("./routes/adminBank.js");
 
+
 const app = express()
 
 
