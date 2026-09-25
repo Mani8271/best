@@ -1626,11 +1626,36 @@ router.get("/withdraw/my-requests", auth, async (req, res) => {
  */
 router.get("/admin/withdrawals", auth, isAdmin, async (req, res) => {
   try {
-    const { status } = req.query;
+    const { status, fromDate, toDate, from, to } = req.query;
 
     let whereClause = {};
-    if (status && ["PENDING", "APPROVED", "REJECTED"].includes(status.toUpperCase())) {
+    if (status && status.toUpperCase() !== "ALL" && ["PENDING", "APPROVED", "REJECTED"].includes(status.toUpperCase())) {
       whereClause.status = status.toUpperCase();
+    }
+
+    const startDateStr = fromDate || from;
+    const endDateStr = toDate || to;
+
+    if (startDateStr || endDateStr) {
+      whereClause.createdAt = {};
+      if (startDateStr) {
+        const start = new Date(startDateStr);
+        if (!isNaN(start.getTime())) {
+          if (/^\d{4}-\d{2}-\d{2}$/.test(String(startDateStr).trim())) {
+            start.setHours(0, 0, 0, 0);
+          }
+          whereClause.createdAt[Op.gte] = start;
+        }
+      }
+      if (endDateStr) {
+        const end = new Date(endDateStr);
+        if (!isNaN(end.getTime())) {
+          if (/^\d{4}-\d{2}-\d{2}$/.test(String(endDateStr).trim())) {
+            end.setHours(23, 59, 59, 999);
+          }
+          whereClause.createdAt[Op.lte] = end;
+        }
+      }
     }
 
     const withdrawals = await InvestmentWithdrawal.findAll({

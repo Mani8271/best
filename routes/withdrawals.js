@@ -291,10 +291,35 @@ router.get("/:id", auth, async (req, res) => {
 // ===============================
 router.get("/", auth, async (req, res) => {
   try {
-    const { status } = req.query;
+    const { status, fromDate, toDate, from, to } = req.query;
 
     const where = { reason: "WITHDRAWAL_REQUEST" };
-    if (status) where.status = toUpper(status);
+    if (status && status.toUpperCase() !== "ALL") where.status = toUpper(status);
+
+    const startDateStr = fromDate || from;
+    const endDateStr = toDate || to;
+
+    if (startDateStr || endDateStr) {
+      where.createdAt = {};
+      if (startDateStr) {
+        const start = new Date(startDateStr);
+        if (!isNaN(start.getTime())) {
+          if (/^\d{4}-\d{2}-\d{2}$/.test(String(startDateStr).trim())) {
+            start.setHours(0, 0, 0, 0);
+          }
+          where.createdAt[Op.gte] = start;
+        }
+      }
+      if (endDateStr) {
+        const end = new Date(endDateStr);
+        if (!isNaN(end.getTime())) {
+          if (/^\d{4}-\d{2}-\d{2}$/.test(String(endDateStr).trim())) {
+            end.setHours(23, 59, 59, 999);
+          }
+          where.createdAt[Op.lte] = end;
+        }
+      }
+    }
 
     const rows = await WalletTransaction.findAll({
       where,
