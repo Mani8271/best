@@ -256,20 +256,7 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
         SET amount = 33.33, 
             description = REPLACE(REPLACE(description, '83.33', '33.33'), '5.00%', '2.00%')
         WHERE description LIKE '%Level 1 Daily Commission%';
-      `);
-
-      // 4. Recalculate and sync commissionBalance for all users in Investments table
-      await sequelize.query(`
-        UPDATE Investments i
-        JOIN (
-          SELECT userId, SUM(amount) AS totalComm 
-          FROM InvestmentTransactions 
-          WHERE amount > 0 
-            AND (description LIKE '%Commission%' OR description LIKE '%Referral%' OR description LIKE '%Level%')
-          GROUP BY userId
-        ) t ON i.userId = t.userId
-        SET i.commissionBalance = t.totalComm;
-      `);
+      `).catch(() => { });
 
       console.log("✅ Server startup DB sync completed successfully.");
     } catch (migErr) {

@@ -712,6 +712,112 @@ router.post("/admin/trigger-payout-transfer", auth, isAdmin, async (req, res) =>
   }
 });
 
+/**
+ * @route   POST /api/investment/admin/fix-balances
+ * @desc    Recalculate & clean up user balances (Available Balance, ROI Balance, Commission Balance, Spot Balance)
+ * @access  Admin / Master / Staff
+ */
+router.post("/admin/fix-balances", auth, isAdmin, async (req, res) => {
+  try {
+    const { userId } = req.body;
+    let users = [];
+
+    if (userId) {
+      const u = await User.findByPk(userId);
+      if (u) users = [u];
+    } else {
+      users = await User.findAll({ attributes: ["id"] });
+    }
+
+    let fixedCount = 0;
+    for (const userNode of users) {
+      const uId = userNode.id;
+      const t = await sequelize.transaction();
+      try {
+        let wallet = await Wallet.findOne({ where: { userId: uId }, transaction: t, lock: t.LOCK.UPDATE });
+        if (!wallet) {
+          wallet = await Wallet.create({ userId: uId, balance: 0, spotBalance: 0, lockedBalance: 0, totalBalance: 0 }, { transaction: t });
+        }
+
+        let investment = await Investment.findOne({ where: { userId: uId }, transaction: t, lock: t.LOCK.UPDATE });
+        if (!investment) {
+          investment = await Investment.create({ userId: uId, totalInvested: 0, activeInvestment: 0, roiBalance: 0, commissionBalance: 0, spotBalance: 0, totalWithdrawn: 0, status: "ACTIVE" }, { transaction: t });
+        }
+
+        const lastTransfer = await InvestmentTransaction.findOne({
+          where: { userId: uId, type: "PAYOUT_TRANSFER" },
+          order: [["id", "DESC"]],
+          transaction: t,
+        });
+
+        const lastTransferId = lastTransfer ? lastTransfer.id : 0;
+
+        const [roiResult] = await sequelize.query(
+          `SELECT SUM(amount) AS sumRoi FROM InvestmentTransactions WHERE userId = :uId AND type = 'DAILY_ROI' AND id > :lastTransferId`,
+          { replacements: { uId, lastTransferId }, transaction: t }
+        );
+        const newRoiBalance = Math.round((Number(roiResult[0]?.sumRoi || 0) + Number.EPSILON) * 100) / 100;
+
+        const [commResult] = await sequelize.query(
+          `SELECT SUM(amount) AS sumComm FROM InvestmentTransactions WHERE userId = :uId AND type = 'DAILY_LEVEL_COMMISSION' AND id > :lastTransferId`,
+          { replacements: { uId, lastTransferId }, transaction: t }
+        );
+        const newCommissionBalance = Math.round((Number(commResult[0]?.sumComm || 0) + Number.EPSILON) * 100) / 100;
+
+        const [spotResult] = await sequelize.query(
+          `SELECT SUM(amount) AS sumSpot FROM InvestmentTransactions WHERE userId = :uId AND type = 'LEVEL_COMMISSION' AND (JSON_EXTRACT(meta, '$.isSpotCommission') = true OR description LIKE '%Direct Spot%')`,
+          { replacements: { uId }, transaction: t }
+        );
+        const totalSpotEarned = Math.round((Number(spotResult[0]?.sumSpot || 0) + Number.EPSILON) * 100) / 100;
+
+        const [spotDebitResult] = await sequelize.query(
+          `SELECT SUM(amount) AS sumSpotDebits FROM WalletTransactions WHERE walletId = :walletId AND type = 'DEBIT' AND JSON_EXTRACT(meta, '$.walletType') = 'SPOT' AND status IN ('APPROVED', 'PENDING')`,
+          { replacements: { walletId: wallet.id }, transaction: t }
+        );
+        const totalSpotDebits = Math.round((Number(spotDebitResult[0]?.sumSpotDebits || 0) + Number.EPSILON) * 100) / 100;
+        const totalSpotBalance = Math.max(0, Math.round((totalSpotEarned - totalSpotDebits + Number.EPSILON) * 100) / 100);
+
+        const [walletBalResult] = await sequelize.query(
+          `SELECT 
+            SUM(CASE 
+              WHEN type = 'CREDIT' AND (JSON_EXTRACT(meta, '$.isPayoutTransfer') = true OR (reason = 'TOPUP' AND JSON_EXTRACT(meta, '$.depositRequestId') IS NULL AND JSON_EXTRACT(meta, '$.isSpotCommission') IS NULL)) THEN amount 
+              WHEN type = 'DEBIT' AND (JSON_EXTRACT(meta, '$.walletType') IS NULL OR JSON_EXTRACT(meta, '$.walletType') = 'MAIN') THEN -amount 
+              ELSE 0 
+            END) AS calcBalance
+           FROM WalletTransactions 
+           WHERE walletId = :walletId AND status = 'APPROVED'`,
+          { replacements: { walletId: wallet.id }, transaction: t }
+        );
+        const newWalletBalance = Math.max(0, Math.round((Number(walletBalResult[0]?.calcBalance || 0) + Number.EPSILON) * 100) / 100);
+
+        investment.roiBalance = newRoiBalance;
+        investment.commissionBalance = newCommissionBalance;
+        investment.spotBalance = totalSpotBalance;
+        await investment.save({ transaction: t });
+
+        wallet.balance = newWalletBalance;
+        wallet.spotBalance = totalSpotBalance;
+        wallet.totalBalance = Math.round((newWalletBalance + totalSpotBalance + Number(wallet.lockedBalance || 0) + Number.EPSILON) * 100) / 100;
+        await wallet.save({ transaction: t });
+
+        await t.commit();
+        fixedCount++;
+      } catch (e) {
+        await t.rollback();
+        console.error(`Error fixing balance for user ${uId}:`, e);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      msg: `Successfully recalculated & fixed balances for ${fixedCount} user(s).`,
+    });
+  } catch (err) {
+    console.error("Fix Balances Admin API Error:", err);
+    return res.status(500).json({ msg: "Failed to fix balances", error: err.message });
+  }
+});
+
 
 /**
  * @route   POST /api/investment/admin/topup
@@ -834,7 +940,6 @@ router.post("/admin/topup", auth, isAdmin, async (req, res) => {
           });
 
           sponsorInvestment.spotBalance = Number(sponsorInvestment.spotBalance || 0) + commAmount;
-          sponsorInvestment.commissionBalance = Number(sponsorInvestment.commissionBalance || 0) + commAmount;
           await sponsorInvestment.save({ transaction: t });
 
           // 2. Credit Sponsor Wallet.spotBalance
@@ -1212,7 +1317,7 @@ router.get("/my-wallet", auth, async (req, res) => {
     const spotBalance = Number(investment.spotBalance || 0);
     const referralBalance = spotBalance;
     const walletBalance = Number(userWallet?.balance || 0);
-    const availableBalance = roiBalance + commissionBalance + walletBalance;
+    const availableBalance = walletBalance;
 
     const recentTransactions = await InvestmentTransaction.findAll({
       where: { userId },

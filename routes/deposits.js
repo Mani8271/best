@@ -235,11 +235,12 @@ router.put("/:id/action", auth, isAdmin, async (req, res) => {
         );
       }
 
-      const newBal = Math.round((Number(wallet.balance) + depositAmount + Number.EPSILON) * 100) / 100;
+      // Deposit amount is credited to Active Investment (investment.activeInvestment), NOT withdrawable Wallet.balance
+      const currentBal = Number(wallet.balance || 0);
       const lockedBal = Number(wallet.lockedBalance || 0);
+      const spotBal = Number(wallet.spotBalance || 0);
 
-      wallet.balance = newBal;
-      wallet.totalBalance = Math.round((newBal + lockedBal + Number.EPSILON) * 100) / 100;
+      wallet.totalBalance = Math.round((currentBal + spotBal + lockedBal + Number.EPSILON) * 100) / 100;
       await wallet.save({ transaction: t });
 
       await WalletTransaction.create(
@@ -345,7 +346,6 @@ router.put("/:id/action", auth, isAdmin, async (req, res) => {
               });
 
               sponsorInvestment.spotBalance = Number(sponsorInvestment.spotBalance || 0) + commAmount;
-              sponsorInvestment.commissionBalance = Number(sponsorInvestment.commissionBalance || 0) + commAmount;
               await sponsorInvestment.save({ transaction: t });
 
               // 2. Credit Sponsor Wallet.spotBalance
