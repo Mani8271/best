@@ -6,6 +6,7 @@ console.log(".env exists:", fs.existsSync(envPath));
 if (fs.existsSync(envPath)) {
   console.log(".env size:", fs.statSync(envPath).size);
 }
+
 const result = require("dotenv").config({ path: envPath });
 if (result.error) console.error("Dotenv Load Error:", result.error);
 console.log("Injected keys:", Object.keys(result.parsed || {}));
