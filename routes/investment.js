@@ -2021,6 +2021,18 @@ router.get("/admin/all-investments", auth, isAdmin, async (req, res) => {
               as: "sponsor",
               attributes: ["id", "name", "userID", "email", "phone"],
             },
+            {
+              model: Wallet,
+              attributes: [
+                "id",
+                "balance",
+                "spotBalance",
+                "lockedBalance",
+                "totalBalance",
+                "totalSpent",
+                "isUnlocked",
+              ],
+            },
           ],
         },
       ],
@@ -2029,12 +2041,81 @@ router.get("/admin/all-investments", auth, isAdmin, async (req, res) => {
 
     const investments = rawInvestments.map((inv) => {
       const invObj = inv.toJSON();
+
+      const walletObj = invObj.User?.Wallet || invObj.User?.wallet || null;
+
+      const walletBalance = walletObj ? String(walletObj.balance ?? "0.00") : "0.00";
+      const walletSpotBalance = walletObj ? String(walletObj.spotBalance ?? "0.00") : "0.00";
+      const walletLockedBalance = walletObj ? String(walletObj.lockedBalance ?? "0.00") : "0.00";
+      const walletTotalBalance = walletObj ? String(walletObj.totalBalance ?? "0.00") : "0.00";
+      const walletTotalSpent = walletObj ? String(walletObj.totalSpent ?? "0.00") : "0.00";
+      const walletIsUnlocked = walletObj ? Boolean(walletObj.isUnlocked) : false;
+
+      const roiBalance = String(invObj.roiBalance ?? "0.00");
+      const commissionBalance = String(invObj.commissionBalance ?? "0.00");
+      const referralBalance = commissionBalance;
+      const spotBalance = String(invObj.spotBalance ?? "0.00");
+
+      const totalAvailableBalance = (
+        Number(roiBalance) +
+        Number(commissionBalance) +
+        Number(spotBalance) +
+        Number(walletBalance)
+      ).toFixed(2);
+
+      const totalAllBalances = (
+        Number(roiBalance) +
+        Number(commissionBalance) +
+        Number(spotBalance) +
+        Number(walletTotalBalance)
+      ).toFixed(2);
+
+      // Attach all wallet and balance params directly on invObj
+      invObj.referralBalance = referralBalance;
+      invObj.commissionBalance = commissionBalance;
+      invObj.availableBalance = walletBalance;
+      invObj.walletBalance = walletBalance;
+      invObj.walletSpotBalance = walletSpotBalance;
+      invObj.walletLockedBalance = walletLockedBalance;
+      invObj.walletTotalBalance = walletTotalBalance;
+      invObj.walletTotalSpent = walletTotalSpent;
+      invObj.walletIsUnlocked = walletIsUnlocked;
+      invObj.totalAvailableBalance = totalAvailableBalance;
+      invObj.totalAllBalances = totalAllBalances;
+
+      const formattedWallet = walletObj || {
+        id: null,
+        userId: invObj.userId,
+        balance: "0.00",
+        spotBalance: "0.00",
+        lockedBalance: "0.00",
+        totalBalance: "0.00",
+        totalSpent: "0.00",
+        isUnlocked: false,
+      };
+
+      invObj.wallet = formattedWallet;
+      invObj.Wallet = formattedWallet;
+
       if (invObj.User) {
         const sponsor = invObj.User.sponsor || null;
         invObj.User.sponsorId = invObj.User.sponsorId || (sponsor ? sponsor.id : null);
         invObj.User.sponsorName = sponsor ? sponsor.name : null;
         invObj.User.sponsorUserID = sponsor ? sponsor.userID : null;
+
+        invObj.User.walletBalance = walletBalance;
+        invObj.User.availableBalance = walletBalance;
+        invObj.User.referralBalance = referralBalance;
+        invObj.User.commissionBalance = commissionBalance;
+        invObj.User.roiBalance = roiBalance;
+        invObj.User.spotBalance = spotBalance;
+        invObj.User.walletSpotBalance = walletSpotBalance;
+        invObj.User.walletLockedBalance = walletLockedBalance;
+        invObj.User.walletTotalBalance = walletTotalBalance;
+        invObj.User.wallet = formattedWallet;
+        invObj.User.Wallet = formattedWallet;
       }
+
       return invObj;
     });
 
