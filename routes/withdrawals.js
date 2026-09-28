@@ -5,6 +5,7 @@ const { sequelize  } = require("../config/db.js");
 
 const User = require("../models/User.js");
 const Wallet = require("../models/Wallet.js");
+const Investment = require("../models/Investment.js");
 const WalletTransaction = require("../models/WalletTransaction.js");
 const auth = require("../middleware/auth.js");
 const isAdmin = require("../middleware/isAdmin.js");
@@ -132,6 +133,13 @@ router.post("/", auth, async (req, res) => {
       wallet.lockedBalance = newLocked;
       wallet.totalBalance = round2(Number(wallet.balance || 0) + Number(newSpotBal) + Number(newLocked));
       await wallet.save({ transaction: t });
+
+      // Keep Investment.spotBalance (shown as referralBalance) in sync with Wallet.spotBalance
+      const investment = await Investment.findOne({ where: { userId }, transaction: t, lock: t.LOCK.UPDATE });
+      if (investment) {
+        investment.spotBalance = Math.max(0, round2(Number(investment.spotBalance || 0) - Number(fee.gross)));
+        await investment.save({ transaction: t });
+      }
     } else {
       if (Number(wallet.balance || 0) < Number(fee.gross)) {
         throw new Error("Insufficient balance");
@@ -394,7 +402,7 @@ router.put("/:id/action", auth, async (req, res) => {
     if (action === "APPROVE") {
       // money withdrawn => remove from lockedBalance (gross)
       wallet.lockedBalance = round2(Number(wallet.lockedBalance) - gross);
-      wallet.totalBalance = round2(Number(wallet.balance) + Number(wallet.lockedBalance));
+      wallet.totalBalance = round2(Number(wallet.balance || 0) + Number(wallet.spotBalance || 0) + Number(wallet.lockedBalance || 0));
       await wallet.save({ transaction: t });
 
       txn.status = "APPROVED";
@@ -423,6 +431,12 @@ router.put("/:id/action", auth, async (req, res) => {
     const isSpot = (txn.meta?.walletType === "SPOT");
     if (isSpot) {
       wallet.spotBalance = round2(Number(wallet.spotBalance || 0) + gross);
+
+      const investment = await Investment.findOne({ where: { userId: wallet.userId }, transaction: t, lock: t.LOCK.UPDATE });
+      if (investment) {
+        investment.spotBalance = round2(Number(investment.spotBalance || 0) + gross);
+        await investment.save({ transaction: t });
+      }
     } else {
       wallet.balance = round2(Number(wallet.balance || 0) + gross);
     }

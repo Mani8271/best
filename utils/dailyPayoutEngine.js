@@ -11,9 +11,46 @@ const { getSettingNumber } = require("../config/settings.js");
  */
 const sleep = (ms = 10) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Max number of missed days (server downtime) that will be back-filled for one investment
+const MAX_CATCHUP_DAYS = 31;
+
+const toIstDateStr = (d) => new Date(d).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+
+const addDays = (dateStr, n) => {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+
+/**
+ * Dates (YYYY-MM-DD, IST) still unpaid for an investment: every day after lastRoiDate up to today.
+ * First-ever payout (no lastRoiDate) pays today only.
+ */
+function getPendingDates(lastRoiDate, todayStr) {
+  if (!lastRoiDate) return [todayStr];
+  if (lastRoiDate >= todayStr) return [];
+
+  const dates = [];
+  let d = addDays(lastRoiDate, 1);
+  while (d <= todayStr) {
+    dates.push(d);
+    d = addDays(d, 1);
+  }
+  return dates.slice(-MAX_CATCHUP_DAYS);
+}
+
+const isBlocked = (user) => !user || user.status === "INACTIVE_BY_ADMIN";
+
 /**
  * High-Performance Chunked Daily ROI & Level Commission Payout Engine.
  * Supports scaling up to Millions of Users using Cursor Batching and Event Loop Micro-pauses.
+ *
+ * Rules:
+ *  - Investors blocked by admin (INACTIVE_BY_ADMIN) earn no ROI and generate no level commissions.
+ *  - Upline sponsors receive level commission only if they are not blocked and have activeInvestment > 0.
+ *    An ineligible sponsor's level share is skipped (not passed up); traversal continues to the next level.
+ *  - Days missed because the server was down are back-filled (max MAX_CATCHUP_DAYS), using the
+ *    investment amount that was active on each of those days.
  */
 let isPayoutEngineRunning = false;
 
@@ -26,7 +63,7 @@ async function processDailyPayouts(batchSize = 500) {
 
   try {
     // Get YYYY-MM-DD in Indian Standard Time (Asia/Kolkata)
-    const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    const todayStr = toIstDateStr(new Date());
     console.log(`[DailyPayoutEngine] 🚀 Starting Chunked Daily ROI Processing for date: ${todayStr} (Batch Size: ${batchSize})`);
 
     // Fetch dynamic settings
@@ -48,6 +85,8 @@ async function processDailyPayouts(batchSize = 500) {
 
     let processedUsersCount = 0;
     let skippedUsersCount = 0;
+    let blockedUsersCount = 0;
+    let catchUpDaysCount = 0;
     let totalRoiDistributed = 0;
     let totalCommissionsDistributed = 0;
     const errors = [];
@@ -92,137 +131,156 @@ async function processDailyPayouts(batchSize = 500) {
           }
 
           // Strict double-run check on fresh DB record
-          if (investment.lastRoiDate === todayStr) {
+          const pendingDates = getPendingDates(investment.lastRoiDate, todayStr);
+          if (pendingDates.length === 0) {
             await t.rollback();
             skippedUsersCount++;
             continue;
           }
 
-          const numActive = Number(investment.activeInvestment || 0);
-          const dailyRoi = Number((numActive * dailyRoiRate).toFixed(2));
-
-          if (dailyRoi <= 0) {
-            await t.rollback();
-            skippedUsersCount++;
-            continue;
-          }
-
-          // 1. Credit Daily ROI to User's ROI Balance
-          investment.roiBalance = Number(investment.roiBalance || 0) + dailyRoi;
-          investment.lastRoiDate = todayStr;
-          await investment.save({ transaction: t });
-
-          // Log Daily ROI Transaction
-          await InvestmentTransaction.create(
-            {
-              userId: investment.userId,
-              type: "DAILY_ROI",
-              amount: dailyRoi,
-              description: `Daily ROI payout of ₹${dailyRoi.toLocaleString("en-IN")} (${(dailyRoiRate * 100).toFixed(4)}%/day on active ₹${numActive.toLocaleString("en-IN")})`,
-              meta: {
-                date: todayStr,
-                activeInvestment: numActive,
-                monthlyRoiPct,
-                dailyRoiRate,
-              },
-            },
-            { transaction: t }
-          );
-
-          totalRoiDistributed += dailyRoi;
-
-          // 2. Traversal Upline 4-Levels for Daily Level Commissions
           const investorUserNode = await User.findByPk(investment.userId, {
-            attributes: ["id", "name", "userID"],
+            attributes: ["id", "name", "userID", "status", "sponsorId"],
             transaction: t,
           });
 
-          let currentUserId = investment.userId;
+          // Blocked investor: no ROI, no upline commission. Advance lastRoiDate so blocked days are never back-paid.
+          if (isBlocked(investorUserNode)) {
+            investment.lastRoiDate = todayStr;
+            await investment.save({ transaction: t });
+            await t.commit();
+            blockedUsersCount++;
+            continue;
+          }
 
-          for (let level = 1; level <= 4; level++) {
-            const currentUserNode = await User.findByPk(currentUserId, {
-              attributes: ["id", "sponsorId", "name", "userID"],
+          const currentActive = Number(investment.activeInvestment || 0);
+
+          // Deposits made after a back-filled day must not earn for that day
+          const laterDeposits = pendingDates.length > 1
+            ? await InvestmentTransaction.findAll({
+              where: { userId: investment.userId, type: "DEPOSIT" },
+              attributes: ["amount", "createdAt"],
               transaction: t,
-            });
+            })
+            : [];
+          const activeOn = (dateStr) => {
+            if (dateStr === todayStr) return currentActive;
+            const depositedLater = laterDeposits
+              .filter((d) => toIstDateStr(d.createdAt) > dateStr)
+              .reduce((sum, d) => sum + Number(d.amount || 0), 0);
+            return Math.max(0, currentActive - depositedLater);
+          };
 
-            if (!currentUserNode || !currentUserNode.sponsorId) {
-              break; // Reached top of tree
-            }
+          // Resolve 4-level upline once and check each sponsor's eligibility
+          const uplines = [];
+          let currentUserNode = investorUserNode;
+          for (let level = 1; level <= 4; level++) {
+            if (!currentUserNode || !currentUserNode.sponsorId) break; // Reached top of tree
 
             const sponsor = await User.findByPk(currentUserNode.sponsorId, {
+              attributes: ["id", "name", "userID", "status", "sponsorId"],
+              transaction: t,
+              lock: t.LOCK.UPDATE,
+            });
+            if (!sponsor) break;
+
+            const sponsorInvestment = await Investment.findOne({
+              where: { userId: sponsor.id },
               transaction: t,
               lock: t.LOCK.UPDATE,
             });
 
-            if (!sponsor) {
-              break;
-            }
+            const eligible =
+              !isBlocked(sponsor) &&
+              sponsorInvestment &&
+              sponsorInvestment.status === "ACTIVE" &&
+              Number(sponsorInvestment.activeInvestment || 0) > 0;
 
-            const rate = rates[level] || 0;
-            if (rate > 0) {
-              // Idempotency check: verify if level commission from this investor for today was already credited to this sponsor
+            uplines.push({ level, sponsor, sponsorInvestment: eligible ? sponsorInvestment : null });
+            currentUserNode = sponsor;
+          }
+
+          const fromName = investorUserNode.name;
+          const fromUserID = investorUserNode.userID;
+
+          for (const dateStr of pendingDates) {
+            const numActive = activeOn(dateStr);
+            const dailyRoi = Number((numActive * dailyRoiRate).toFixed(2));
+            if (dailyRoi <= 0) continue;
+
+            // 1. Credit Daily ROI to User's ROI Balance
+            investment.roiBalance = Number(investment.roiBalance || 0) + dailyRoi;
+
+            // Log Daily ROI Transaction
+            await InvestmentTransaction.create(
+              {
+                userId: investment.userId,
+                type: "DAILY_ROI",
+                amount: dailyRoi,
+                description: `Daily ROI payout of ₹${dailyRoi.toLocaleString("en-IN")} (${(dailyRoiRate * 100).toFixed(4)}%/day on active ₹${numActive.toLocaleString("en-IN")})${dateStr !== todayStr ? ` for ${dateStr}` : ""}`,
+                meta: {
+                  date: dateStr,
+                  activeInvestment: numActive,
+                  monthlyRoiPct,
+                  dailyRoiRate,
+                  ...(dateStr !== todayStr ? { catchUp: true } : {}),
+                },
+              },
+              { transaction: t }
+            );
+
+            totalRoiDistributed += dailyRoi;
+            if (dateStr !== todayStr) catchUpDaysCount++;
+
+            // 2. Daily Level Commissions to eligible upline sponsors
+            for (const { level, sponsor, sponsorInvestment } of uplines) {
+              const rate = rates[level] || 0;
+              if (rate <= 0 || !sponsorInvestment) continue;
+
+              // Idempotency check: verify if level commission from this investor for this date was already credited to this sponsor
               const existingComm = await InvestmentTransaction.findOne({
                 where: {
                   userId: sponsor.id,
                   type: "DAILY_LEVEL_COMMISSION",
                   fromUserId: investment.userId,
                   level,
-                  "meta.date": todayStr,
+                  "meta.date": dateStr,
                 },
                 transaction: t,
               });
+              if (existingComm) continue;
 
-              if (!existingComm) {
-                const commAmount = Number((numActive * (rate / 30)).toFixed(2));
+              const commAmount = Number((numActive * (rate / 30)).toFixed(2));
+              if (commAmount <= 0) continue;
 
-                if (commAmount > 0) {
-                  let [sponsorInvestment] = await Investment.findOrCreate({
-                    where: { userId: sponsor.id },
-                    defaults: {
-                      totalInvested: 0,
-                      activeInvestment: 0,
-                      roiBalance: 0,
-                      commissionBalance: 0,
-                      totalWithdrawn: 0,
-                      status: "ACTIVE",
-                    },
-                    transaction: t,
-                    lock: t.LOCK.UPDATE,
-                  });
+              sponsorInvestment.commissionBalance = Number(sponsorInvestment.commissionBalance || 0) + commAmount;
+              await sponsorInvestment.save({ transaction: t });
 
-                  sponsorInvestment.commissionBalance = Number(sponsorInvestment.commissionBalance || 0) + commAmount;
-                  await sponsorInvestment.save({ transaction: t });
+              await InvestmentTransaction.create(
+                {
+                  userId: sponsor.id,
+                  type: "DAILY_LEVEL_COMMISSION",
+                  amount: commAmount,
+                  level,
+                  fromUserId: investment.userId,
+                  description: `Level ${level} Daily Commission (${(rate * 100).toFixed(2)}% monthly) from ${fromName} (${fromUserID}) active investment of ₹${numActive.toLocaleString("en-IN")}${dateStr !== todayStr ? ` for ${dateStr}` : ""}`,
+                  meta: {
+                    date: dateStr,
+                    level,
+                    ratePercentage: rate * 100,
+                    investorActiveInvestment: numActive,
+                    investorUserId: fromUserID,
+                    investorName: fromName,
+                  },
+                },
+                { transaction: t }
+              );
 
-                  const fromName = investorUserNode ? investorUserNode.name : currentUserNode.name;
-                  const fromUserID = investorUserNode ? investorUserNode.userID : currentUserNode.userID;
-
-                  await InvestmentTransaction.create(
-                    {
-                      userId: sponsor.id,
-                      type: "DAILY_LEVEL_COMMISSION",
-                      amount: commAmount,
-                      level,
-                      fromUserId: investment.userId,
-                      description: `Level ${level} Daily Commission (${(rate * 100).toFixed(2)}% monthly) from ${fromName} (${fromUserID}) active investment of ₹${numActive.toLocaleString("en-IN")}`,
-                      meta: {
-                        date: todayStr,
-                        level,
-                        ratePercentage: rate * 100,
-                        investorActiveInvestment: numActive,
-                        investorUserId: fromUserID,
-                        investorName: fromName,
-                      },
-                    },
-                    { transaction: t }
-                  );
-
-                  totalCommissionsDistributed += commAmount;
-                }
-              }
+              totalCommissionsDistributed += commAmount;
             }
-
-            currentUserId = sponsor.id;
           }
+
+          investment.lastRoiDate = todayStr;
+          await investment.save({ transaction: t });
 
           await t.commit();
           processedUsersCount++;
@@ -238,7 +296,7 @@ async function processDailyPayouts(batchSize = 500) {
     }
 
     console.log(
-      `[DailyPayoutEngine] ✅ Completed for ${todayStr}. Processed: ${processedUsersCount}, Skipped: ${skippedUsersCount}, Total ROI: ₹${totalRoiDistributed}, Total Comm: ₹${totalCommissionsDistributed}`
+      `[DailyPayoutEngine] ✅ Completed for ${todayStr}. Processed: ${processedUsersCount}, Skipped: ${skippedUsersCount}, Blocked: ${blockedUsersCount}, Catch-up days: ${catchUpDaysCount}, Total ROI: ₹${totalRoiDistributed}, Total Comm: ₹${totalCommissionsDistributed}`
     );
 
     return {
@@ -246,6 +304,8 @@ async function processDailyPayouts(batchSize = 500) {
       date: todayStr,
       processedUsersCount,
       skippedUsersCount,
+      blockedUsersCount,
+      catchUpDaysCount,
       totalRoiDistributed: Number(totalRoiDistributed.toFixed(2)),
       totalCommissionsDistributed: Number(totalCommissionsDistributed.toFixed(2)),
       errors,

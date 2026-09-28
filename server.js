@@ -233,32 +233,18 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
       await sequelize.query(`ALTER TABLE Investments ADD COLUMN spotBalance DECIMAL(12,2) NOT NULL DEFAULT 0.00;`).catch(() => { });
       await sequelize.query(`ALTER TABLE Users MODIFY COLUMN status ENUM('ACTIVE', 'INACTIVE', 'INACTIVE_BY_ADMIN') NOT NULL DEFAULT 'INACTIVE';`).catch(() => { });
 
-      // 1. Ensure dynamic AppSettings values are set in DB
+      // 1. Seed default AppSettings only if missing (never overwrite admin-configured values)
       await sequelize.query(`
-        INSERT INTO AppSettings (\`key\`, \`value\`, createdAt, updatedAt) 
-        VALUES 
+        INSERT IGNORE INTO AppSettings (\`key\`, \`value\`, createdAt, updatedAt)
+        VALUES
           ('INVESTMENT_SPOT_REFERRAL_PERCENT', '5', NOW(), NOW()),
           ('INVESTMENT_LEVEL_1_PERCENT', '2', NOW(), NOW()),
           ('INVESTMENT_LEVEL_2_PERCENT', '1.5', NOW(), NOW()),
           ('INVESTMENT_LEVEL_3_PERCENT', '1', NOW(), NOW()),
           ('INVESTMENT_LEVEL_4_PERCENT', '0.5', NOW(), NOW()),
           ('PAYOUT_TRANSFER_DAY_1', '10', NOW(), NOW()),
-          ('PAYOUT_TRANSFER_DAY_2', '25', NOW(), NOW())
-        ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`), updatedAt = NOW();
+          ('PAYOUT_TRANSFER_DAY_2', '25', NOW(), NOW());
       `);
-
-      // 2. Remove duplicate transactions #99 and #103 if present
-      await sequelize.query(`
-        DELETE FROM InvestmentTransactions WHERE id IN (99, 103);
-      `).catch(() => { });
-
-      // 3. Correct past Daily Level 1 Commission transactions to ₹33.33 (2.00% monthly)
-      await sequelize.query(`
-        UPDATE InvestmentTransactions 
-        SET amount = 33.33, 
-            description = REPLACE(REPLACE(description, '83.33', '33.33'), '5.00%', '2.00%')
-        WHERE description LIKE '%Level 1 Daily Commission%';
-      `).catch(() => { });
 
       console.log("✅ Server startup DB sync completed successfully.");
     } catch (migErr) {

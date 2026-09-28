@@ -529,11 +529,11 @@ async function updateAppSetting(key, val) {
 }
 
 /**
- * @route   POST /api/investment/admin/settings
- * @desc    Update dynamic investment settings (Min withdrawal, ROI %, Level 1-4 Commission %, Payout Transfer Days).
- * @access  Admin / Master / Staff
+ * Shared handler for POST & PUT /api/investment/admin/settings.
+ * Empty / missing fields are left unchanged; invalid values are rejected with 400
+ * (so a blank form field can never silently set a percentage to 0).
  */
-router.post("/admin/settings", auth, isAdmin, async (req, res) => {
+async function saveInvestmentSettings(req, res) {
   try {
     const {
       minWithdrawalAmount,
@@ -549,35 +549,32 @@ router.post("/admin/settings", auth, isAdmin, async (req, res) => {
       payoutDay2,
     } = req.body;
 
-    const targetMinWithdrawal = minWithdrawalAmount !== undefined ? minWithdrawalAmount : value;
+    const isBlank = (v) => v === undefined || v === null || String(v).trim() === "";
+    const pick = (a, b) => (isBlank(a) ? b : a);
 
-    if (targetMinWithdrawal !== undefined) {
-      await updateAppSetting("INVESTMENT_MIN_WITHDRAWAL", targetMinWithdrawal);
-    }
-    if (roiPercent !== undefined) {
-      await updateAppSetting("INVESTMENT_ROI_PERCENT", roiPercent);
-    }
-    if (level1Percent !== undefined) {
-      await updateAppSetting("INVESTMENT_LEVEL_1_PERCENT", level1Percent);
-    }
-    if (level2Percent !== undefined) {
-      await updateAppSetting("INVESTMENT_LEVEL_2_PERCENT", level2Percent);
-    }
-    if (level3Percent !== undefined) {
-      await updateAppSetting("INVESTMENT_LEVEL_3_PERCENT", level3Percent);
-    }
-    if (level4Percent !== undefined) {
-      await updateAppSetting("INVESTMENT_LEVEL_4_PERCENT", level4Percent);
+    const fields = [
+      { key: "INVESTMENT_MIN_WITHDRAWAL", label: "Min withdrawal amount", val: pick(minWithdrawalAmount, value), min: 0, max: Infinity },
+      { key: "INVESTMENT_ROI_PERCENT", label: "ROI %", val: roiPercent, min: 0, max: 100 },
+      { key: "INVESTMENT_LEVEL_1_PERCENT", label: "Level 1 %", val: level1Percent, min: 0, max: 100 },
+      { key: "INVESTMENT_LEVEL_2_PERCENT", label: "Level 2 %", val: level2Percent, min: 0, max: 100 },
+      { key: "INVESTMENT_LEVEL_3_PERCENT", label: "Level 3 %", val: level3Percent, min: 0, max: 100 },
+      { key: "INVESTMENT_LEVEL_4_PERCENT", label: "Level 4 %", val: level4Percent, min: 0, max: 100 },
+      // Days capped at 28 so the transfer runs in every month (incl. February)
+      { key: "PAYOUT_TRANSFER_DAY_1", label: "Payout transfer day 1", val: pick(payoutTransferDay1, payoutDay1), min: 1, max: 28, integer: true },
+      { key: "PAYOUT_TRANSFER_DAY_2", label: "Payout transfer day 2", val: pick(payoutTransferDay2, payoutDay2), min: 1, max: 28, integer: true },
+    ].filter((f) => !isBlank(f.val));
+
+    // Validate everything first so a bad field doesn't leave settings half-saved
+    for (const f of fields) {
+      const num = Number(f.val);
+      if (!Number.isFinite(num) || num < f.min || num > f.max || (f.integer && !Number.isInteger(num))) {
+        const range = f.max === Infinity ? `>= ${f.min}` : `between ${f.min} and ${f.max}`;
+        return res.status(400).json({ msg: `${f.label} must be ${f.integer ? "a whole number " : ""}${range}` });
+      }
     }
 
-    const day1Val = payoutTransferDay1 !== undefined ? payoutTransferDay1 : payoutDay1;
-    const day2Val = payoutTransferDay2 !== undefined ? payoutTransferDay2 : payoutDay2;
-
-    if (day1Val !== undefined && Number(day1Val) >= 1 && Number(day1Val) <= 31) {
-      await updateAppSetting("PAYOUT_TRANSFER_DAY_1", day1Val);
-    }
-    if (day2Val !== undefined && Number(day2Val) >= 1 && Number(day2Val) <= 31) {
-      await updateAppSetting("PAYOUT_TRANSFER_DAY_2", day2Val);
+    for (const f of fields) {
+      await updateAppSetting(f.key, f.val);
     }
 
     const currentMinWithdrawal = await getSettingNumber("INVESTMENT_MIN_WITHDRAWAL", 2500);
@@ -609,90 +606,21 @@ router.post("/admin/settings", auth, isAdmin, async (req, res) => {
     console.error("Update Investment Admin Settings Error:", err);
     return res.status(500).json({ msg: "Failed to update admin settings", error: err.message });
   }
-});
+}
+
+/**
+ * @route   POST /api/investment/admin/settings
+ * @desc    Update dynamic investment settings (Min withdrawal, ROI %, Level 1-4 Commission %, Payout Transfer Days).
+ * @access  Admin / Master / Staff
+ */
+router.post("/admin/settings", auth, isAdmin, saveInvestmentSettings);
 
 /**
  * @route   PUT /api/investment/admin/settings
  * @desc    PUT alias for updating dynamic investment settings.
  * @access  Admin / Master / Staff
  */
-router.put("/admin/settings", auth, isAdmin, async (req, res) => {
-  try {
-    const {
-      minWithdrawalAmount,
-      value,
-      roiPercent,
-      level1Percent,
-      level2Percent,
-      level3Percent,
-      level4Percent,
-      payoutTransferDay1,
-      payoutTransferDay2,
-      payoutDay1,
-      payoutDay2,
-    } = req.body;
-
-    const targetMinWithdrawal = minWithdrawalAmount !== undefined ? minWithdrawalAmount : value;
-
-    if (targetMinWithdrawal !== undefined) {
-      await updateAppSetting("INVESTMENT_MIN_WITHDRAWAL", targetMinWithdrawal);
-    }
-    if (roiPercent !== undefined) {
-      await updateAppSetting("INVESTMENT_ROI_PERCENT", roiPercent);
-    }
-    if (level1Percent !== undefined) {
-      await updateAppSetting("INVESTMENT_LEVEL_1_PERCENT", level1Percent);
-    }
-    if (level2Percent !== undefined) {
-      await updateAppSetting("INVESTMENT_LEVEL_2_PERCENT", level2Percent);
-    }
-    if (level3Percent !== undefined) {
-      await updateAppSetting("INVESTMENT_LEVEL_3_PERCENT", level3Percent);
-    }
-    if (level4Percent !== undefined) {
-      await updateAppSetting("INVESTMENT_LEVEL_4_PERCENT", level4Percent);
-    }
-
-    const day1Val = payoutTransferDay1 !== undefined ? payoutTransferDay1 : payoutDay1;
-    const day2Val = payoutTransferDay2 !== undefined ? payoutTransferDay2 : payoutDay2;
-
-    if (day1Val !== undefined && Number(day1Val) >= 1 && Number(day1Val) <= 28) {
-      await updateAppSetting("PAYOUT_TRANSFER_DAY_1", day1Val);
-    }
-    if (day2Val !== undefined && Number(day2Val) >= 1 && Number(day2Val) <= 28) {
-      await updateAppSetting("PAYOUT_TRANSFER_DAY_2", day2Val);
-    }
-
-    const currentMinWithdrawal = await getSettingNumber("INVESTMENT_MIN_WITHDRAWAL", 2500);
-    const currentRoi = await getSettingNumber("INVESTMENT_ROI_PERCENT", 5);
-    const currentL1 = await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", 2);
-    const currentL2 = await getSettingNumber("INVESTMENT_LEVEL_2_PERCENT", 1.5);
-    const currentL3 = await getSettingNumber("INVESTMENT_LEVEL_3_PERCENT", 1.0);
-    const currentL4 = await getSettingNumber("INVESTMENT_LEVEL_4_PERCENT", 0.5);
-    const currentDay1 = await getSettingNumber("PAYOUT_TRANSFER_DAY_1", 10);
-    const currentDay2 = await getSettingNumber("PAYOUT_TRANSFER_DAY_2", 25);
-
-    return res.status(200).json({
-      success: true,
-      msg: "Dynamic investment settings updated successfully",
-      settings: {
-        minWithdrawalAmount: currentMinWithdrawal,
-        roiPercent: currentRoi,
-        payoutTransferDay1: currentDay1,
-        payoutTransferDay2: currentDay2,
-        levelCommissions: {
-          level1Percent: currentL1,
-          level2Percent: currentL2,
-          level3Percent: currentL3,
-          level4Percent: currentL4,
-        },
-      },
-    });
-  } catch (err) {
-    console.error("Update Investment Admin Settings Error:", err);
-    return res.status(500).json({ msg: "Failed to update admin settings", error: err.message });
-  }
-});
+router.put("/admin/settings", auth, isAdmin, saveInvestmentSettings);
 
 /**
  * @route   POST /api/investment/admin/trigger-payout-transfer
@@ -744,25 +672,52 @@ router.post("/admin/fix-balances", auth, isAdmin, async (req, res) => {
           investment = await Investment.create({ userId: uId, totalInvested: 0, activeInvestment: 0, roiBalance: 0, commissionBalance: 0, spotBalance: 0, totalWithdrawn: 0, status: "ACTIVE" }, { transaction: t });
         }
 
-        const lastTransfer = await InvestmentTransaction.findOne({
-          where: { userId: uId, type: "PAYOUT_TRANSFER" },
-          order: [["id", "DESC"]],
+        // Replay ROI / Commission ledger in order so withdrawals, refunds & payout transfers
+        // are applied exactly like the live flows do.
+        const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+        const ledger = await InvestmentTransaction.findAll({
+          where: { userId: uId, type: ["DAILY_ROI", "DAILY_LEVEL_COMMISSION", "PAYOUT_TRANSFER", "WITHDRAWAL"] },
+          order: [["id", "ASC"]],
           transaction: t,
         });
 
-        const lastTransferId = lastTransfer ? lastTransfer.id : 0;
+        let newRoiBalance = 0;
+        let newCommissionBalance = 0;
+        let withdrawnFromWallet = 0; // portion of withdrawal requests deducted directly from Wallet.balance (no WalletTransaction logged)
 
-        const [roiResult] = await sequelize.query(
-          `SELECT SUM(amount) AS sumRoi FROM InvestmentTransactions WHERE userId = :uId AND type = 'DAILY_ROI' AND id > :lastTransferId`,
-          { replacements: { uId, lastTransferId }, transaction: t }
-        );
-        const newRoiBalance = Math.round((Number(roiResult[0]?.sumRoi || 0) + Number.EPSILON) * 100) / 100;
+        for (const txn of ledger) {
+          const amt = Number(txn.amount || 0);
+          if (txn.type === "DAILY_ROI") {
+            newRoiBalance = round2(newRoiBalance + amt);
+          } else if (txn.type === "DAILY_LEVEL_COMMISSION") {
+            newCommissionBalance = round2(newCommissionBalance + amt);
+          } else if (txn.type === "PAYOUT_TRANSFER") {
+            newRoiBalance = 0;
+            newCommissionBalance = 0;
+          } else if (txn.type === "WITHDRAWAL") {
+            let meta = txn.meta || {};
+            if (typeof meta === "string") {
+              try { meta = JSON.parse(meta); } catch { meta = {}; }
+            }
+            const desc = String(txn.description || "");
+            const status = meta.status || (desc.includes("REJECTED") ? "REJECTED" : desc.includes("PAID/APPROVED") ? "APPROVED" : "PENDING");
 
-        const [commResult] = await sequelize.query(
-          `SELECT SUM(amount) AS sumComm FROM InvestmentTransactions WHERE userId = :uId AND type = 'DAILY_LEVEL_COMMISSION' AND id > :lastTransferId`,
-          { replacements: { uId, lastTransferId }, transaction: t }
-        );
-        const newCommissionBalance = Math.round((Number(commResult[0]?.sumComm || 0) + Number.EPSILON) * 100) / 100;
+            if (status === "PENDING") {
+              // Withdrawal request: deduct ROI -> Commission -> Wallet (same order as /withdraw/request)
+              let remaining = amt;
+              const fromRoi = Math.min(newRoiBalance, remaining);
+              newRoiBalance = round2(newRoiBalance - fromRoi);
+              remaining = round2(remaining - fromRoi);
+              const fromComm = Math.min(newCommissionBalance, remaining);
+              newCommissionBalance = round2(newCommissionBalance - fromComm);
+              remaining = round2(remaining - fromComm);
+              withdrawnFromWallet = round2(withdrawnFromWallet + remaining);
+            } else if (status === "REJECTED") {
+              // Reject flow refunds full amount into ROI balance
+              newRoiBalance = round2(newRoiBalance + amt);
+            }
+          }
+        }
 
         const [spotResult] = await sequelize.query(
           `SELECT SUM(amount) AS sumSpot FROM InvestmentTransactions WHERE userId = :uId AND type = 'LEVEL_COMMISSION' AND (JSON_EXTRACT(meta, '$.isSpotCommission') = true OR description LIKE '%Direct Spot%')`,
@@ -788,7 +743,7 @@ router.post("/admin/fix-balances", auth, isAdmin, async (req, res) => {
            WHERE walletId = :walletId AND status = 'APPROVED'`,
           { replacements: { walletId: wallet.id }, transaction: t }
         );
-        const newWalletBalance = Math.max(0, Math.round((Number(walletBalResult[0]?.calcBalance || 0) + Number.EPSILON) * 100) / 100);
+        const newWalletBalance = Math.max(0, Math.round((Number(walletBalResult[0]?.calcBalance || 0) - withdrawnFromWallet + Number.EPSILON) * 100) / 100);
 
         investment.roiBalance = newRoiBalance;
         investment.commissionBalance = newCommissionBalance;
@@ -1314,7 +1269,8 @@ router.get("/my-wallet", auth, async (req, res) => {
 
     const roiBalance = Number(investment.roiBalance || 0);
     const commissionBalance = Number(investment.commissionBalance || 0);
-    const spotBalance = Number(investment.spotBalance || 0);
+    // Wallet.spotBalance is the withdrawable source of truth for spot/referral earnings
+    const spotBalance = Number(userWallet ? userWallet.spotBalance || 0 : investment.spotBalance || 0);
     const referralBalance = spotBalance;
     const walletBalance = Number(userWallet?.balance || 0);
     const availableBalance = walletBalance;
@@ -2157,33 +2113,51 @@ router.post("/admin/trigger-daily-payout", auth, isAdmin, async (req, res) => {
 router.post("/admin/cleanup-duplicate-payouts", auth, isAdmin, async (req, res) => {
   const t = await sequelize.transaction();
   try {
-    // 1. Find duplicate Daily ROI transactions (keep oldest ID)
+    // Duplicates are grouped by the IST payout date stored in meta.date (not UTC createdAt),
+    // keeping the oldest ID per group. Each duplicate row appears exactly once.
+    const payoutDate = "JSON_UNQUOTE(JSON_EXTRACT(meta, '$.date'))";
+
+    // 1. Find duplicate Daily ROI transactions (same user, same payout date)
     const [dupRoiRows] = await sequelize.query(
-      `SELECT t1.id, t1.userId, t1.amount
-       FROM InvestmentTransactions t1
-       JOIN InvestmentTransactions t2 
-         ON t1.userId = t2.userId 
-         AND DATE(t1.createdAt) = DATE(t2.createdAt)
-         AND t1.description LIKE 'Daily ROI payout%'
-         AND t2.description LIKE 'Daily ROI payout%'
-         AND t1.id > t2.id`,
+      `SELECT tx.id, tx.userId, tx.amount
+       FROM InvestmentTransactions tx
+       JOIN (
+         SELECT userId, ${payoutDate} AS payDate, MIN(id) AS keepId
+         FROM InvestmentTransactions
+         WHERE type = 'DAILY_ROI' AND JSON_EXTRACT(meta, '$.date') IS NOT NULL
+         GROUP BY userId, payDate
+         HAVING COUNT(*) > 1
+       ) g ON tx.userId = g.userId
+         AND tx.type = 'DAILY_ROI'
+         AND JSON_UNQUOTE(JSON_EXTRACT(tx.meta, '$.date')) = g.payDate
+         AND tx.id <> g.keepId`,
       { transaction: t }
     );
 
-    // 2. Find duplicate Level Commission transactions (keep oldest ID)
+    // 2. Find duplicate Level Commission transactions (same sponsor, investor, level, payout date)
     const [dupCommRows] = await sequelize.query(
-      `SELECT t1.id, t1.userId, t1.amount
-       FROM InvestmentTransactions t1
-       JOIN InvestmentTransactions t2 
-         ON t1.userId = t2.userId 
-         AND t1.fromUserId = t2.fromUserId
-         AND t1.level = t2.level
-         AND DATE(t1.createdAt) = DATE(t2.createdAt)
-         AND t1.description LIKE 'Level % Daily Commission%'
-         AND t2.description LIKE 'Level % Daily Commission%'
-         AND t1.id > t2.id`,
+      `SELECT tx.id, tx.userId, tx.amount
+       FROM InvestmentTransactions tx
+       JOIN (
+         SELECT userId, fromUserId, level, ${payoutDate} AS payDate, MIN(id) AS keepId
+         FROM InvestmentTransactions
+         WHERE type = 'DAILY_LEVEL_COMMISSION' AND JSON_EXTRACT(meta, '$.date') IS NOT NULL
+         GROUP BY userId, fromUserId, level, payDate
+         HAVING COUNT(*) > 1
+       ) g ON tx.userId = g.userId
+         AND tx.fromUserId = g.fromUserId
+         AND tx.level = g.level
+         AND tx.type = 'DAILY_LEVEL_COMMISSION'
+         AND JSON_UNQUOTE(JSON_EXTRACT(tx.meta, '$.date')) = g.payDate
+         AND tx.id <> g.keepId`,
       { transaction: t }
     );
+
+    const sumByUser = (rows) => {
+      const map = new Map();
+      for (const r of rows) map.set(r.userId, (map.get(r.userId) || 0) + Number(r.amount || 0));
+      return map;
+    };
 
     const dupRoiIds = dupRoiRows.map((r) => r.id);
     const dupCommIds = dupCommRows.map((r) => r.id);
@@ -2191,56 +2165,32 @@ router.post("/admin/cleanup-duplicate-payouts", auth, isAdmin, async (req, res) 
     let totalRoiDeducted = 0;
     let totalCommDeducted = 0;
 
-    // Deduct excess ROI balances
+    // Deduct excess ROI balances & delete duplicate ROI transactions
     if (dupRoiIds.length > 0) {
-      await sequelize.query(
-        `UPDATE Investments i
-         JOIN (
-           SELECT t1.userId, SUM(t1.amount) AS excess_roi
-           FROM InvestmentTransactions t1
-           JOIN InvestmentTransactions t2 
-             ON t1.userId = t2.userId 
-             AND DATE(t1.createdAt) = DATE(t2.createdAt)
-             AND t1.description LIKE 'Daily ROI payout%'
-             AND t2.description LIKE 'Daily ROI payout%'
-             AND t1.id > t2.id
-           GROUP BY t1.userId
-         ) dup ON i.userId = dup.userId
-         SET i.roiBalance = GREATEST(0, i.roiBalance - dup.excess_roi)`,
-        { transaction: t }
-      );
-      totalRoiDeducted = dupRoiRows.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+      for (const [uId, excess] of sumByUser(dupRoiRows)) {
+        await sequelize.query(
+          `UPDATE Investments SET roiBalance = GREATEST(0, roiBalance - :excess) WHERE userId = :uId`,
+          { replacements: { uId, excess: Number(excess.toFixed(2)) }, transaction: t }
+        );
+        totalRoiDeducted += excess;
+      }
 
-      // Delete duplicate ROI transactions
       await sequelize.query(
         `DELETE FROM InvestmentTransactions WHERE id IN (:ids)`,
         { replacements: { ids: dupRoiIds }, transaction: t }
       );
     }
 
-    // Deduct excess Commission balances
+    // Deduct excess Commission balances & delete duplicate Commission transactions
     if (dupCommIds.length > 0) {
-      await sequelize.query(
-        `UPDATE Investments i
-         JOIN (
-           SELECT t1.userId, SUM(t1.amount) AS excess_comm
-           FROM InvestmentTransactions t1
-           JOIN InvestmentTransactions t2 
-             ON t1.userId = t2.userId 
-             AND t1.fromUserId = t2.fromUserId
-             AND t1.level = t2.level
-             AND DATE(t1.createdAt) = DATE(t2.createdAt)
-             AND t1.description LIKE 'Level % Daily Commission%'
-             AND t2.description LIKE 'Level % Daily Commission%'
-             AND t1.id > t2.id
-           GROUP BY t1.userId
-         ) dup ON i.userId = dup.userId
-         SET i.commissionBalance = GREATEST(0, i.commissionBalance - dup.excess_comm)`,
-        { transaction: t }
-      );
-      totalCommDeducted = dupCommRows.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+      for (const [uId, excess] of sumByUser(dupCommRows)) {
+        await sequelize.query(
+          `UPDATE Investments SET commissionBalance = GREATEST(0, commissionBalance - :excess) WHERE userId = :uId`,
+          { replacements: { uId, excess: Number(excess.toFixed(2)) }, transaction: t }
+        );
+        totalCommDeducted += excess;
+      }
 
-      // Delete duplicate Commission transactions
       await sequelize.query(
         `DELETE FROM InvestmentTransactions WHERE id IN (:ids)`,
         { replacements: { ids: dupCommIds }, transaction: t }
@@ -2263,25 +2213,6 @@ router.post("/admin/cleanup-duplicate-payouts", auth, isAdmin, async (req, res) 
     await t.rollback();
     console.error("Cleanup Duplicate Payouts Error:", err);
     return res.status(500).json({ msg: "Failed to cleanup duplicate payouts", error: err.message });
-  }
-});
-
-/**
- * @route   POST /api/investment/admin/trigger-payout-transfer
- * @desc    Manually trigger bi-monthly payout transfer (transfers ROI & Level Commission to main Available Wallet balance).
- * @access  Admin / Master / Staff
- */
-router.post("/admin/trigger-payout-transfer", auth, isAdmin, async (req, res) => {
-  try {
-    const result = await processPayoutTransfers();
-    return res.status(200).json({
-      success: true,
-      msg: `Bi-Monthly Payout Transfer completed successfully for ${result.date}`,
-      summary: result,
-    });
-  } catch (err) {
-    console.error("Admin Trigger Payout Transfer Error:", err);
-    return res.status(500).json({ msg: "Failed to process payout transfer", error: err.message });
   }
 });
 
