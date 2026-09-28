@@ -234,6 +234,19 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
       await sequelize.query(`ALTER TABLE Investments ADD COLUMN spotBalance DECIMAL(12,2) NOT NULL DEFAULT 0.00;`).catch(() => { });
       await sequelize.query(`ALTER TABLE Users MODIFY COLUMN status ENUM('ACTIVE', 'INACTIVE', 'INACTIVE_BY_ADMIN') NOT NULL DEFAULT 'INACTIVE';`).catch(() => { });
 
+      // Old DBs have InvestmentTransactions.type as an ENUM missing newer types (DAILY_ROI, DAILY_LEVEL_COMMISSION,
+      // PAYOUT_TRANSFER...), which MySQL silently stores as ''. Match the model (STRING 50) and backfill blank rows.
+      await sequelize.query(`ALTER TABLE InvestmentTransactions MODIFY COLUMN type VARCHAR(50) NOT NULL;`).catch(() => { });
+      await sequelize.query(`
+        UPDATE InvestmentTransactions SET type = CASE
+          WHEN description LIKE 'Daily ROI payout%' THEN 'DAILY_ROI'
+          WHEN description LIKE 'Level % Daily Commission%' THEN 'DAILY_LEVEL_COMMISSION'
+          WHEN description LIKE '%Payout Transfer%' THEN 'PAYOUT_TRANSFER'
+          WHEN description LIKE 'Balance reset after%' THEN 'BALANCE_RESET'
+          ELSE type END
+        WHERE type = '' OR type IS NULL;
+      `).catch(() => { });
+
       // 1. Seed default AppSettings only if missing (never overwrite admin-configured values)
       await sequelize.query(`
         INSERT IGNORE INTO AppSettings (\`key\`, \`value\`, createdAt, updatedAt)
