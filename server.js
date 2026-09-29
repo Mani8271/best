@@ -241,6 +241,7 @@ PairMatch.belongsTo(User, { foreignKey: "rightUserId", as: "rightUser" });
         UPDATE InvestmentTransactions SET type = CASE
           WHEN description LIKE 'Daily ROI payout%' THEN 'DAILY_ROI'
           WHEN description LIKE 'Level % Daily Commission%' THEN 'DAILY_LEVEL_COMMISSION'
+          WHEN description LIKE 'Direct Spot Referral Commission%' THEN 'LEVEL_COMMISSION'
           WHEN description LIKE '%Payout Transfer%' THEN 'PAYOUT_TRANSFER'
           WHEN description LIKE 'Balance reset after%' THEN 'BALANCE_RESET'
           ELSE type END

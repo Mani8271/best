@@ -8,6 +8,7 @@ const isAdmin = require("../middleware/isAdmin.js");
 
 const User = require("../models/User.js");
 const Wallet = require("../models/Wallet.js");
+const WalletTransaction = require("../models/WalletTransaction.js");
 const Investment = require("../models/Investment.js");
 const InvestmentTransaction = require("../models/InvestmentTransaction.js");
 const InvestmentWithdrawal = require("../models/InvestmentWithdrawal.js");
@@ -1314,6 +1315,287 @@ router.get("/my-wallet", auth, async (req, res) => {
   } catch (err) {
     console.error("Get My Investment Wallet Error:", err);
     return res.status(500).json({ msg: "Failed to fetch investment wallet details", error: err.message });
+  }
+});
+
+/* Shared helpers for ROI / Referral history APIs */
+const istDate = (d) => new Date(d).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+const istTime = (d) => new Date(d).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }).toUpperCase();
+const parseMeta = (m) => {
+  if (typeof m === "string") {
+    try { return JSON.parse(m); } catch { return {}; }
+  }
+  return m || {};
+};
+const getPaging = (query = {}) => ({
+  page: Math.max(1, Number(query.page) || 1),
+  limit: Math.max(1, Math.min(Number(query.limit) || 10, 100)), // Default 10 items per page
+});
+const paginate = (items, page, limit) => {
+  const totalItems = items.length;
+  const totalPages = Math.ceil(totalItems / limit);
+  return {
+    currentPage: page,
+    limit,
+    totalItems,
+    totalPages,
+    hasNextPage: page < totalPages,
+    hasPrevPage: page > 1,
+    transactions: items.slice((page - 1) * limit, page * limit),
+  };
+};
+const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+
+/** Admin routes accept either userID string (e.g. SI566665) or numeric id */
+const findUserByIdOrUserID = (userID) =>
+  User.findOne({
+    where: { [Op.or]: [{ userID }, { id: isNaN(userID) ? 0 : Number(userID) }] },
+    attributes: ["id", "name", "userID"],
+  });
+
+/**
+ * ROI credits that make up the user's current ROI balance, i.e. DAILY_ROI entries for payout dates
+ * after the latest payout transfer (scheduled day 10/25 from settings, or the user's last PAYOUT_TRANSFER).
+ */
+async function getRoiCycleHistory(userId, query = {}) {
+  const { page, limit } = getPaging(query);
+  const pad = (n) => String(n).padStart(2, "0");
+
+  // 1. Latest scheduled payout day on or before today (IST)
+  const todayStr = istDate(new Date());
+  const [y, m, d] = todayStr.split("-").map(Number);
+  const payoutDays = [
+    await getSettingNumber("PAYOUT_TRANSFER_DAY_1", 10),
+    await getSettingNumber("PAYOUT_TRANSFER_DAY_2", 25),
+  ].sort((a, b) => a - b);
+
+  let cycleStartAfter;
+  const pastDaysThisMonth = payoutDays.filter((day) => day <= d);
+  if (pastDaysThisMonth.length > 0) {
+    cycleStartAfter = `${y}-${pad(m)}-${pad(Math.max(...pastDaysThisMonth))}`;
+  } else {
+    const prevY = m === 1 ? y - 1 : y;
+    const prevM = m === 1 ? 12 : m - 1;
+    cycleStartAfter = `${prevY}-${pad(prevM)}-${pad(Math.max(...payoutDays))}`;
+  }
+
+  // 2. User's last actual payout transfer (covers manual admin-triggered transfers)
+  const lastTransfer = await InvestmentTransaction.findOne({
+    where: { userId, type: "PAYOUT_TRANSFER" },
+    order: [["id", "DESC"]],
+  });
+  if (lastTransfer) {
+    const transferDate = parseMeta(lastTransfer.meta).date || istDate(lastTransfer.createdAt);
+    if (transferDate > cycleStartAfter) cycleStartAfter = transferDate;
+  }
+
+  const investment = await Investment.findOne({ where: { userId }, attributes: ["roiBalance"] });
+
+  const rows = await InvestmentTransaction.findAll({
+    where: { userId, type: "DAILY_ROI" },
+    order: [["id", "DESC"]],
+  });
+
+  const transactions = [];
+  let totalCredited = 0;
+  for (const row of rows) {
+    const meta = parseMeta(row.meta);
+    const forDate = meta.date || istDate(row.createdAt);
+    if (forDate <= cycleStartAfter) continue;
+
+    const amount = Number(row.amount || 0);
+    totalCredited += amount;
+    transactions.push({
+      id: row.id,
+      amount,
+      type: "CREDIT",
+      date: istDate(row.createdAt),
+      time: istTime(row.createdAt),
+      forDate,
+      activeInvestment: meta.activeInvestment !== undefined ? Number(meta.activeInvestment) : null,
+      description: row.description,
+    });
+  }
+
+  return {
+    roiBalance: Number(investment?.roiBalance || 0),
+    cycleStartAfter,
+    totalCredited: round2(totalCredited),
+    ...paginate(transactions, page, limit),
+  };
+}
+
+/**
+ * Full Referral (Spot) wallet history: spot commission credits + spot wallet withdrawals, newest first.
+ * Balance is Wallet.spotBalance (the withdrawable source of truth).
+ * Optional query: type=CREDIT|DEBIT to filter.
+ */
+async function getReferralHistory(userId, query = {}) {
+  const { page, limit } = getPaging(query);
+  const typeFilter = String(query.type || "").trim().toUpperCase();
+
+  const wallet = await Wallet.findOne({ where: { userId } });
+
+  // Credits: Direct Spot Referral Commissions (matched by description too, in case old rows have a blank type)
+  const creditRows = await InvestmentTransaction.findAll({
+    where: {
+      userId,
+      [Op.or]: [
+        { type: "LEVEL_COMMISSION" },
+        { description: { [Op.like]: "Direct Spot Referral Commission%" } },
+      ],
+    },
+    include: [{ model: User, as: "fromUser", attributes: ["id", "name", "userID"] }],
+  });
+
+  const items = [];
+  let totalEarned = 0;
+  for (const row of creditRows) {
+    const meta = parseMeta(row.meta);
+    const isSpot = meta.isSpotCommission === true || String(row.description || "").includes("Direct Spot");
+    if (!isSpot) continue;
+
+    const amount = Number(row.amount || 0);
+    totalEarned += amount;
+    items.push({
+      id: `C-${row.id}`,
+      type: "CREDIT",
+      category: "REFERRAL_COMMISSION",
+      amount,
+      status: "APPROVED",
+      fromName: row.fromUser?.name || meta.investorName || null,
+      fromUserID: row.fromUser?.userID || meta.investorUserId || null,
+      investmentAmount: meta.investmentAmount !== undefined ? Number(meta.investmentAmount) : null,
+      ratePercentage: meta.ratePercentage !== undefined ? Number(meta.ratePercentage) : null,
+      date: istDate(row.createdAt),
+      time: istTime(row.createdAt),
+      createdAt: row.createdAt,
+      description: row.description,
+    });
+  }
+
+  // Debits: withdrawal requests made from the SPOT wallet (REJECTED ones were refunded to the spot balance)
+  let totalWithdrawn = 0;
+  if (wallet) {
+    const withdrawalRows = await WalletTransaction.findAll({
+      where: { walletId: wallet.id, type: "DEBIT", reason: "WITHDRAWAL_REQUEST" },
+    });
+
+    for (const row of withdrawalRows) {
+      const meta = parseMeta(row.meta);
+      if (meta.walletType !== "SPOT") continue;
+
+      const amount = Number(row.amount || 0);
+      if (row.status !== "REJECTED") totalWithdrawn += amount;
+      items.push({
+        id: `D-${row.id}`,
+        type: "DEBIT",
+        category: "WITHDRAWAL",
+        amount,
+        status: row.status,
+        netAmount: meta.netAmount !== undefined ? Number(meta.netAmount) : null,
+        totalDeduction: meta.totalDeduction !== undefined ? Number(meta.totalDeduction) : null,
+        payoutMethod: row.payoutMethod || null,
+        transactionId: row.transactionId || null,
+        adminNote: row.adminNote || null,
+        date: istDate(row.createdAt),
+        time: istTime(row.createdAt),
+        createdAt: row.createdAt,
+        description:
+          row.status === "REJECTED"
+            ? `Withdrawal of ₹${amount.toLocaleString("en-IN")} rejected, amount returned to referral balance`
+            : `Withdrawal of ₹${amount.toLocaleString("en-IN")} (${row.status})`,
+      });
+    }
+  }
+
+  const filtered = typeFilter === "CREDIT" || typeFilter === "DEBIT" ? items.filter((i) => i.type === typeFilter) : items;
+  filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  return {
+    referralBalance: Number(wallet?.spotBalance || 0),
+    totalEarned: round2(totalEarned),
+    totalWithdrawn: round2(totalWithdrawn),
+    ...paginate(filtered, page, limit),
+  };
+}
+
+/**
+ * @route   GET /api/investment/referral-history
+ * @desc    Logged-in user's Referral (Spot) balance + all referral credits & withdrawals, paginated.
+ * @access  Authenticated User
+ * Query:   page=1&limit=10&type=CREDIT|DEBIT
+ */
+router.get("/referral-history", auth, async (req, res) => {
+  try {
+    const result = await getReferralHistory(req.user.id, req.query);
+    return res.status(200).json({ success: true, ...result });
+  } catch (err) {
+    console.error("Get Referral History Error:", err);
+    return res.status(500).json({ success: false, msg: "Failed to fetch referral history", error: err.message });
+  }
+});
+
+/**
+ * @route   GET /api/investment/admin/referral-history/:userID
+ * @desc    Admin: any user's Referral (Spot) balance + all referral credits & withdrawals, paginated.
+ * @access  Admin / Master / Staff
+ */
+router.get("/admin/referral-history/:userID", auth, isAdmin, async (req, res) => {
+  try {
+    const targetUser = await findUserByIdOrUserID(req.params.userID);
+    if (!targetUser) {
+      return res.status(404).json({ success: false, msg: "User not found" });
+    }
+
+    const result = await getReferralHistory(targetUser.id, req.query);
+    return res.status(200).json({
+      success: true,
+      user: { id: targetUser.id, name: targetUser.name, userID: targetUser.userID },
+      ...result,
+    });
+  } catch (err) {
+    console.error("Admin Get Referral History Error:", err);
+    return res.status(500).json({ success: false, msg: "Failed to fetch referral history", error: err.message });
+  }
+});
+
+/**
+ * @route   GET /api/investment/roi-history
+ * @desc    Logged-in user's ROI balance + ROI credits since the last payout.
+ * @access  Authenticated User
+ */
+router.get("/roi-history", auth, async (req, res) => {
+  try {
+    const result = await getRoiCycleHistory(req.user.id, req.query);
+    return res.status(200).json({ success: true, ...result });
+  } catch (err) {
+    console.error("Get ROI History Error:", err);
+    return res.status(500).json({ success: false, msg: "Failed to fetch ROI history", error: err.message });
+  }
+});
+
+/**
+ * @route   GET /api/investment/admin/roi-history/:userID
+ * @desc    Admin: any user's ROI balance + ROI credits since the last payout (by userID string or numeric id).
+ * @access  Admin / Master / Staff
+ */
+router.get("/admin/roi-history/:userID", auth, isAdmin, async (req, res) => {
+  try {
+    const targetUser = await findUserByIdOrUserID(req.params.userID);
+    if (!targetUser) {
+      return res.status(404).json({ success: false, msg: "User not found" });
+    }
+
+    const result = await getRoiCycleHistory(targetUser.id, req.query);
+    return res.status(200).json({
+      success: true,
+      user: { id: targetUser.id, name: targetUser.name, userID: targetUser.userID },
+      ...result,
+    });
+  } catch (err) {
+    console.error("Admin Get ROI History Error:", err);
+    return res.status(500).json({ success: false, msg: "Failed to fetch ROI history", error: err.message });
   }
 });
 
