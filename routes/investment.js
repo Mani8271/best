@@ -1560,6 +1560,306 @@ router.get("/admin/referral-history/:userID", auth, isAdmin, async (req, res) =>
   }
 });
 
+/* ======================================================================================
+   📊 LEVEL INCENTIVE APIs (Level 1-4 downline members & daily level commission history)
+====================================================================================== */
+
+const MAX_INCENTIVE_LEVEL = 4;
+
+class ApiError extends Error {
+  constructor(status, msg) {
+    super(msg);
+    this.status = status;
+  }
+}
+
+const sendApiError = (res, err, logLabel) => {
+  if (err instanceof ApiError) {
+    return res.status(err.status).json({ success: false, msg: err.message });
+  }
+  console.error(`${logLabel}:`, err);
+  return res.status(500).json({ success: false, msg: "Failed to fetch level incentives", error: err.message });
+};
+
+const parseLevel = (value) => {
+  const level = Number(value);
+  if (!Number.isInteger(level) || level < 1 || level > MAX_INCENTIVE_LEVEL) {
+    throw new ApiError(400, `Level must be between 1 and ${MAX_INCENTIVE_LEVEL}`);
+  }
+  return level;
+};
+
+async function getLevelRates() {
+  return {
+    1: await getSettingNumber("INVESTMENT_LEVEL_1_PERCENT", 2),
+    2: await getSettingNumber("INVESTMENT_LEVEL_2_PERCENT", 1.5),
+    3: await getSettingNumber("INVESTMENT_LEVEL_3_PERCENT", 1.0),
+    4: await getSettingNumber("INVESTMENT_LEVEL_4_PERCENT", 0.5),
+  };
+}
+
+/** Downline users per level via Users.sponsorId: index 0 = Level 1 (direct referrals) ... index 3 = Level 4 */
+async function getDownlineLevels(userId) {
+  const levels = [];
+  const visited = new Set([userId]);
+  let currentIds = [userId];
+
+  for (let level = 1; level <= MAX_INCENTIVE_LEVEL; level++) {
+    if (currentIds.length === 0) {
+      levels.push([]);
+      continue;
+    }
+    const users = (
+      await User.findAll({
+        where: { sponsorId: currentIds },
+        attributes: ["id", "name", "userID", "status"],
+        order: [["id", "ASC"]],
+      })
+    ).filter((u) => !visited.has(u.id)); // guard against bad sponsor loops
+
+    users.forEach((u) => visited.add(u.id));
+    levels.push(users);
+    currentIds = users.map((u) => u.id);
+  }
+  return levels;
+}
+
+/** Whether the viewer currently earns level commissions (same rule as dailyPayoutEngine) */
+async function isIncentiveEligible(userId) {
+  const [user, investment] = await Promise.all([
+    User.findByPk(userId, { attributes: ["id", "status"] }),
+    Investment.findOne({ where: { userId }, attributes: ["status", "activeInvestment"] }),
+  ]);
+  return (
+    !!user &&
+    user.status !== "INACTIVE_BY_ADMIN" &&
+    !!investment &&
+    investment.status === "ACTIVE" &&
+    Number(investment.activeInvestment || 0) > 0
+  );
+}
+
+/** Builds per-member rows (investment, per-day incentive, total earned) for one level */
+async function buildLevelMembers(viewerId, level, members, ratePercent, eligible) {
+  const memberIds = members.map((m) => m.id);
+  if (memberIds.length === 0) return [];
+
+  const investments = await Investment.findAll({
+    where: { userId: memberIds },
+    attributes: ["userId", "status", "activeInvestment"],
+  });
+  const investmentByUser = new Map(investments.map((i) => [i.userId, i]));
+
+  const earnedRows = await InvestmentTransaction.findAll({
+    where: { userId: viewerId, type: "DAILY_LEVEL_COMMISSION", level, fromUserId: memberIds },
+    attributes: ["fromUserId", [sequelize.fn("SUM", sequelize.col("amount")), "earned"]],
+    group: ["fromUserId"],
+    raw: true,
+  });
+  const earnedByUser = new Map(earnedRows.map((r) => [Number(r.fromUserId), Number(r.earned || 0)]));
+
+  return members.map((m) => {
+    const inv = investmentByUser.get(m.id);
+    const activeInvestment = inv && inv.status === "ACTIVE" ? Number(inv.activeInvestment || 0) : 0;
+    const earning = eligible && m.status !== "INACTIVE_BY_ADMIN" && activeInvestment > 0;
+    return {
+      userId: m.id,
+      userID: m.userID,
+      name: m.name,
+      activeInvestment,
+      incentivePerDay: earning ? round2(activeInvestment * (ratePercent / 100 / 30)) : 0,
+      totalEarned: round2(earnedByUser.get(m.id) || 0),
+    };
+  });
+}
+
+/** Screen 1: Level 1-4 cards (members, amount, incentive per day, total earned) */
+async function getLevelIncentiveSummary(viewerId) {
+  const [downline, rates, eligible] = await Promise.all([
+    getDownlineLevels(viewerId),
+    getLevelRates(),
+    isIncentiveEligible(viewerId),
+  ]);
+
+  const levels = [];
+  for (let level = 1; level <= MAX_INCENTIVE_LEVEL; level++) {
+    const rows = await buildLevelMembers(viewerId, level, downline[level - 1], rates[level], eligible);
+    levels.push({
+      level,
+      ratePercent: rates[level],
+      members: rows.length,
+      activeMembers: rows.filter((r) => r.activeInvestment > 0).length,
+      totalAmount: round2(rows.reduce((s, r) => s + r.activeInvestment, 0)),
+      incentivePerDay: round2(rows.reduce((s, r) => s + r.incentivePerDay, 0)),
+      totalEarned: round2(rows.reduce((s, r) => s + r.totalEarned, 0)),
+    });
+  }
+
+  return { eligible, levels };
+}
+
+/** Screen 2: members of one level, paginated (highest investment first) */
+async function getLevelIncentiveMembers(viewerId, levelParam, query = {}) {
+  const level = parseLevel(levelParam);
+  const { page, limit } = getPaging(query);
+  const [downline, rates, eligible] = await Promise.all([
+    getDownlineLevels(viewerId),
+    getLevelRates(),
+    isIncentiveEligible(viewerId),
+  ]);
+
+  const rows = await buildLevelMembers(viewerId, level, downline[level - 1], rates[level], eligible);
+  rows.sort((a, b) => b.activeInvestment - a.activeInvestment || String(a.name).localeCompare(String(b.name)));
+
+  const { transactions: members, ...paging } = paginate(rows, page, limit);
+  return { eligible, level, ratePercent: rates[level], ...paging, members };
+}
+
+/** Screen 3: one member's daily commission history at that level, with running total, paginated */
+async function getLevelIncentiveMemberTransactions(viewerId, levelParam, memberParam, query = {}) {
+  const level = parseLevel(levelParam);
+  const { page, limit } = getPaging(query);
+  const newestFirst = String(query.order || "").toLowerCase() === "desc";
+
+  const member = await findUserByIdOrUserID(memberParam);
+  const downline = await getDownlineLevels(viewerId);
+  if (!member || !downline[level - 1].some((m) => m.id === member.id)) {
+    throw new ApiError(404, `Member not found in Level ${level}`);
+  }
+
+  const memberInvestment = await Investment.findOne({ where: { userId: member.id }, attributes: ["activeInvestment"] });
+
+  const rows = await InvestmentTransaction.findAll({
+    where: { userId: viewerId, type: "DAILY_LEVEL_COMMISSION", level, fromUserId: member.id },
+    order: [["id", "ASC"]],
+  });
+
+  let runningTotal = 0;
+  const items = rows.map((row) => {
+    const meta = parseMeta(row.meta);
+    const amount = Number(row.amount || 0);
+    runningTotal = round2(runningTotal + amount);
+    return {
+      id: row.id,
+      date: meta.date || istDate(row.createdAt),
+      time: istTime(row.createdAt),
+      amount,
+      runningTotal,
+      investorActiveInvestment: meta.investorActiveInvestment !== undefined ? Number(meta.investorActiveInvestment) : null,
+      ratePercentage: meta.ratePercentage !== undefined ? Number(meta.ratePercentage) : null,
+    };
+  });
+  if (newestFirst) items.reverse();
+
+  return {
+    level,
+    member: {
+      userId: member.id,
+      userID: member.userID,
+      name: member.name,
+      activeInvestment: Number(memberInvestment?.activeInvestment || 0),
+    },
+    totalEarned: runningTotal,
+    ...paginate(items, page, limit),
+  };
+}
+
+/** Resolves the target user for admin level-incentive routes */
+async function resolveAdminTarget(userIDParam) {
+  const targetUser = await findUserByIdOrUserID(userIDParam);
+  if (!targetUser) throw new ApiError(404, "User not found");
+  return { user: { id: targetUser.id, name: targetUser.name, userID: targetUser.userID }, id: targetUser.id };
+}
+
+/**
+ * @route   GET /api/investment/level-incentives
+ * @desc    Level 1-4 incentive cards for the logged-in user.
+ * @access  Authenticated User
+ */
+router.get("/level-incentives", auth, async (req, res) => {
+  try {
+    const result = await getLevelIncentiveSummary(req.user.id);
+    return res.status(200).json({ success: true, ...result });
+  } catch (err) {
+    return sendApiError(res, err, "Get Level Incentives Error");
+  }
+});
+
+/**
+ * @route   GET /api/investment/level-incentives/:level/members
+ * @desc    Members of one level with their investment & incentive, paginated.
+ * @access  Authenticated User
+ * Query:   page=1&limit=10
+ */
+router.get("/level-incentives/:level/members", auth, async (req, res) => {
+  try {
+    const result = await getLevelIncentiveMembers(req.user.id, req.params.level, req.query);
+    return res.status(200).json({ success: true, ...result });
+  } catch (err) {
+    return sendApiError(res, err, "Get Level Incentive Members Error");
+  }
+});
+
+/**
+ * @route   GET /api/investment/level-incentives/:level/members/:memberId/transactions
+ * @desc    Daily commission history from one member (with running total), paginated.
+ * @access  Authenticated User
+ * Query:   page=1&limit=10&order=asc|desc (default asc = oldest first)
+ */
+router.get("/level-incentives/:level/members/:memberId/transactions", auth, async (req, res) => {
+  try {
+    const result = await getLevelIncentiveMemberTransactions(req.user.id, req.params.level, req.params.memberId, req.query);
+    return res.status(200).json({ success: true, ...result });
+  } catch (err) {
+    return sendApiError(res, err, "Get Level Incentive Transactions Error");
+  }
+});
+
+/**
+ * @route   GET /api/investment/admin/level-incentives/:userID
+ * @desc    Admin: Level 1-4 incentive cards for any user.
+ * @access  Admin / Master / Staff
+ */
+router.get("/admin/level-incentives/:userID", auth, isAdmin, async (req, res) => {
+  try {
+    const target = await resolveAdminTarget(req.params.userID);
+    const result = await getLevelIncentiveSummary(target.id);
+    return res.status(200).json({ success: true, user: target.user, ...result });
+  } catch (err) {
+    return sendApiError(res, err, "Admin Get Level Incentives Error");
+  }
+});
+
+/**
+ * @route   GET /api/investment/admin/level-incentives/:userID/:level/members
+ * @desc    Admin: members of one level for any user, paginated.
+ * @access  Admin / Master / Staff
+ */
+router.get("/admin/level-incentives/:userID/:level/members", auth, isAdmin, async (req, res) => {
+  try {
+    const target = await resolveAdminTarget(req.params.userID);
+    const result = await getLevelIncentiveMembers(target.id, req.params.level, req.query);
+    return res.status(200).json({ success: true, user: target.user, ...result });
+  } catch (err) {
+    return sendApiError(res, err, "Admin Get Level Incentive Members Error");
+  }
+});
+
+/**
+ * @route   GET /api/investment/admin/level-incentives/:userID/:level/members/:memberId/transactions
+ * @desc    Admin: daily commission history from one member for any user, paginated.
+ * @access  Admin / Master / Staff
+ */
+router.get("/admin/level-incentives/:userID/:level/members/:memberId/transactions", auth, isAdmin, async (req, res) => {
+  try {
+    const target = await resolveAdminTarget(req.params.userID);
+    const result = await getLevelIncentiveMemberTransactions(target.id, req.params.level, req.params.memberId, req.query);
+    return res.status(200).json({ success: true, user: target.user, ...result });
+  } catch (err) {
+    return sendApiError(res, err, "Admin Get Level Incentive Transactions Error");
+  }
+});
+
 /**
  * @route   GET /api/investment/roi-history
  * @desc    Logged-in user's ROI balance + ROI credits since the last payout.
