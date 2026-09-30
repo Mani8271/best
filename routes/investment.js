@@ -1560,6 +1560,267 @@ router.get("/admin/referral-history/:userID", auth, isAdmin, async (req, res) =>
   }
 });
 
+/**
+ * All withdrawals of a user, newest first, from both flows:
+ *  - INVESTMENT: InvestmentWithdrawal requests (POST /api/investment/withdraw/request)
+ *  - WALLET / SPOT: WalletTransaction WITHDRAWAL_REQUEST debits (POST /api/withdrawals)
+ * Optional query: status=PENDING|APPROVED|REJECTED to filter.
+ */
+async function getWithdrawalHistory(userId, query = {}) {
+  const { page, limit } = getPaging(query);
+  const statusFilter = String(query.status || "").trim().toUpperCase();
+
+  const items = [];
+
+  const investmentRows = await InvestmentWithdrawal.findAll({ where: { userId } });
+  for (const row of investmentRows) {
+    const amount = Number(row.amount || 0);
+    items.push({
+      id: `I-${row.id}`,
+      source: "INVESTMENT",
+      amount,
+      netAmount: amount,
+      totalDeduction: 0,
+      status: row.status,
+      payoutMethod: "BANK",
+      transactionId: row.utrNumber || null,
+      adminNote: row.adminRemark || null,
+      bankName: row.bankName || null,
+      bankAccountNumber: row.bankAccountNumber || null,
+      ifscCode: row.ifscCode || null,
+      accountHolderName: row.accountHolderName || null,
+      processedAt: row.processedAt || null,
+      date: istDate(row.createdAt),
+      time: istTime(row.createdAt),
+      createdAt: row.createdAt,
+      description: `Withdrawal of ₹${amount.toLocaleString("en-IN")} (${row.status})`,
+    });
+  }
+
+  const wallet = await Wallet.findOne({ where: { userId } });
+  if (wallet) {
+    const walletRows = await WalletTransaction.findAll({
+      where: { walletId: wallet.id, type: "DEBIT", reason: "WITHDRAWAL_REQUEST" },
+    });
+    for (const row of walletRows) {
+      const meta = parseMeta(row.meta);
+      const amount = Number(row.amount || 0);
+      items.push({
+        id: `W-${row.id}`,
+        source: meta.walletType === "SPOT" ? "SPOT" : "WALLET",
+        amount,
+        netAmount: meta.netAmount !== undefined ? Number(meta.netAmount) : amount,
+        totalDeduction: meta.totalDeduction !== undefined ? Number(meta.totalDeduction) : 0,
+        gstAmount: meta.gstAmount !== undefined ? Number(meta.gstAmount) : null,
+        adminFeeAmount: meta.adminFeeAmount !== undefined ? Number(meta.adminFeeAmount) : null,
+        status: row.status,
+        payoutMethod: row.payoutMethod || null,
+        transactionId: row.transactionId || null,
+        adminNote: row.adminNote || null,
+        processedAt: row.processedAt || null,
+        date: istDate(row.createdAt),
+        time: istTime(row.createdAt),
+        createdAt: row.createdAt,
+        description:
+          row.status === "REJECTED"
+            ? `Withdrawal of ₹${amount.toLocaleString("en-IN")} rejected, amount refunded`
+            : `Withdrawal of ₹${amount.toLocaleString("en-IN")} (${row.status})`,
+      });
+    }
+  }
+
+  const summary = { totalWithdrawn: 0, totalNetPaid: 0, pendingAmount: 0, rejectedAmount: 0 };
+  for (const i of items) {
+    if (i.status === "APPROVED") {
+      summary.totalWithdrawn += i.amount;
+      summary.totalNetPaid += i.netAmount;
+    } else if (i.status === "PENDING") {
+      summary.pendingAmount += i.amount;
+    } else if (i.status === "REJECTED") {
+      summary.rejectedAmount += i.amount;
+    }
+  }
+
+  const filtered = ["PENDING", "APPROVED", "REJECTED"].includes(statusFilter)
+    ? items.filter((i) => i.status === statusFilter)
+    : items;
+  filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  return {
+    totalWithdrawn: round2(summary.totalWithdrawn),
+    totalNetPaid: round2(summary.totalNetPaid),
+    pendingAmount: round2(summary.pendingAmount),
+    rejectedAmount: round2(summary.rejectedAmount),
+    ...paginate(filtered, page, limit),
+  };
+}
+
+/**
+ * @route   GET /api/investment/withdrawal-history
+ * @desc    Logged-in user's withdrawal totals + all withdrawal transactions (investment, wallet & spot), paginated.
+ * @access  Authenticated User
+ * Query:   page=1&limit=10&status=PENDING|APPROVED|REJECTED
+ */
+router.get("/withdrawal-history", auth, async (req, res) => {
+  try {
+    const result = await getWithdrawalHistory(req.user.id, req.query);
+    return res.status(200).json({ success: true, ...result });
+  } catch (err) {
+    console.error("Get Withdrawal History Error:", err);
+    return res.status(500).json({ success: false, msg: "Failed to fetch withdrawal history", error: err.message });
+  }
+});
+
+/**
+ * @route   GET /api/investment/admin/withdrawal-history/:userID
+ * @desc    Admin: any user's withdrawal totals + all withdrawal transactions, paginated.
+ * @access  Admin / Master / Staff
+ */
+router.get("/admin/withdrawal-history/:userID", auth, isAdmin, async (req, res) => {
+  try {
+    const targetUser = await findUserByIdOrUserID(req.params.userID);
+    if (!targetUser) {
+      return res.status(404).json({ success: false, msg: "User not found" });
+    }
+
+    const result = await getWithdrawalHistory(targetUser.id, req.query);
+    return res.status(200).json({
+      success: true,
+      user: { id: targetUser.id, name: targetUser.name, userID: targetUser.userID },
+      ...result,
+    });
+  } catch (err) {
+    console.error("Admin Get Withdrawal History Error:", err);
+    return res.status(500).json({ success: false, msg: "Failed to fetch withdrawal history", error: err.message });
+  }
+});
+
+const AVAILABLE_CATEGORY_LABELS = {
+  PAYOUT_TRANSFER: "Payout transfer",
+  TOPUP: "Wallet top-up",
+  PAIR_BONUS: "Pair bonus",
+  DOWNLINE_PAIR_BONUS: "Downline pair bonus",
+  REFERRAL_JOIN_BONUS: "Referral join bonus",
+  REFUND: "Refund",
+  WITHDRAWAL_REFUND: "Withdrawal refund",
+  WITHDRAWAL: "Withdrawal",
+  ORDER_PAYMENT: "Order payment",
+};
+
+/**
+ * Available (main Wallet.balance) history: every WalletTransaction that moved Wallet.balance, newest first.
+ * Excluded because they never touch Wallet.balance:
+ *  - deposit TOPUPs (meta.depositRequestId) -> credited to activeInvestment
+ *  - spot commission TOPUPs (meta.isSpotCommission) and SPOT withdrawals / their refunds -> spotBalance
+ *  - still-pending bonuses (meta.pending) -> lockedBalance until released
+ * Optional query: type=CREDIT|DEBIT to filter.
+ */
+async function getAvailableBalanceHistory(userId, query = {}) {
+  const { page, limit } = getPaging(query);
+  const typeFilter = String(query.type || "").trim().toUpperCase();
+
+  const wallet = await Wallet.findOne({ where: { userId } });
+  const rows = wallet ? await WalletTransaction.findAll({ where: { walletId: wallet.id } }) : [];
+
+  const withdrawalWalletType = new Map();
+  for (const row of rows) {
+    if (row.reason === "WITHDRAWAL_REQUEST") withdrawalWalletType.set(row.id, parseMeta(row.meta).walletType);
+  }
+
+  const items = [];
+  let totalCredited = 0;
+  let totalDebited = 0;
+  for (const row of rows) {
+    const meta = parseMeta(row.meta);
+
+    if (meta.pending === true || meta.depositRequestId || meta.isSpotCommission) continue;
+    if (row.reason === "WITHDRAWAL_REQUEST" && meta.walletType === "SPOT") continue;
+    if (row.reason === "WITHDRAWAL_REFUND" && withdrawalWalletType.get(Number(meta.originalWithdrawalId)) === "SPOT") continue;
+
+    let category = row.reason;
+    if (meta.isPayoutTransfer) category = "PAYOUT_TRANSFER";
+    else if (row.reason === "WITHDRAWAL_REQUEST") category = "WITHDRAWAL";
+
+    const amount = Number(row.amount || 0);
+    if (row.type === "CREDIT") totalCredited += amount;
+    else totalDebited += amount;
+
+    let description = AVAILABLE_CATEGORY_LABELS[category] || category;
+    if (category === "PAYOUT_TRANSFER") {
+      description += ` (ROI: ₹${Number(meta.transferredRoi || 0).toLocaleString("en-IN")}, Comm: ₹${Number(meta.transferredCommission || 0).toLocaleString("en-IN")})`;
+    } else if (category === "WITHDRAWAL") {
+      description += ` (${row.status})`;
+    }
+
+    items.push({
+      id: row.id,
+      type: row.type,
+      category,
+      amount,
+      status: row.status || "APPROVED",
+      netAmount: category === "WITHDRAWAL" && meta.netAmount !== undefined ? Number(meta.netAmount) : null,
+      totalDeduction: category === "WITHDRAWAL" && meta.totalDeduction !== undefined ? Number(meta.totalDeduction) : null,
+      transactionId: row.transactionId || null,
+      adminNote: row.adminNote || null,
+      orderId: row.orderId || null,
+      date: istDate(row.createdAt),
+      time: istTime(row.createdAt),
+      createdAt: row.createdAt,
+      description,
+    });
+  }
+
+  const filtered = typeFilter === "CREDIT" || typeFilter === "DEBIT" ? items.filter((i) => i.type === typeFilter) : items;
+  filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  return {
+    availableBalance: Number(wallet?.balance || 0),
+    totalCredited: round2(totalCredited),
+    totalDebited: round2(totalDebited),
+    ...paginate(filtered, page, limit),
+  };
+}
+
+/**
+ * @route   GET /api/investment/available-balance-history
+ * @desc    Logged-in user's Available (Wallet) balance + every credit/debit that moved it, paginated.
+ * @access  Authenticated User
+ * Query:   page=1&limit=10&type=CREDIT|DEBIT
+ */
+router.get("/available-balance-history", auth, async (req, res) => {
+  try {
+    const result = await getAvailableBalanceHistory(req.user.id, req.query);
+    return res.status(200).json({ success: true, ...result });
+  } catch (err) {
+    console.error("Get Available Balance History Error:", err);
+    return res.status(500).json({ success: false, msg: "Failed to fetch available balance history", error: err.message });
+  }
+});
+
+/**
+ * @route   GET /api/investment/admin/available-balance-history/:userID
+ * @desc    Admin: any user's Available (Wallet) balance + every credit/debit that moved it, paginated.
+ * @access  Admin / Master / Staff
+ */
+router.get("/admin/available-balance-history/:userID", auth, isAdmin, async (req, res) => {
+  try {
+    const targetUser = await findUserByIdOrUserID(req.params.userID);
+    if (!targetUser) {
+      return res.status(404).json({ success: false, msg: "User not found" });
+    }
+
+    const result = await getAvailableBalanceHistory(targetUser.id, req.query);
+    return res.status(200).json({
+      success: true,
+      user: { id: targetUser.id, name: targetUser.name, userID: targetUser.userID },
+      ...result,
+    });
+  } catch (err) {
+    console.error("Admin Get Available Balance History Error:", err);
+    return res.status(500).json({ success: false, msg: "Failed to fetch available balance history", error: err.message });
+  }
+});
+
 /* ======================================================================================
    📊 LEVEL INCENTIVE APIs (Level 1-4 downline members & daily level commission history)
 ====================================================================================== */
