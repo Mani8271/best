@@ -2813,7 +2813,7 @@ router.get("/admin/all-investments", auth, isAdmin, async (req, res) => {
       include: [
         {
           model: User,
-          attributes: ["id", "name", "userID", "email", "phone", "sponsorId"],
+          attributes: ["id", "name", "userID", "email", "phone", "sponsorId", "status"],
           include: [
             {
               model: User,
@@ -2875,6 +2875,14 @@ router.get("/admin/all-investments", auth, isAdmin, async (req, res) => {
         Number(walletBalance) +
         Number(commissionBalance)
       ).toFixed(2);
+
+      // Investment.status is never downgraded, so derive it: admin-deactivated user or no active capital => INACTIVE
+      const userStatus = invObj.User?.status || null;
+      const isActive = userStatus === "ACTIVE" && Number(invObj.activeInvestment || 0) > 0;
+      invObj.investmentStatus = invObj.status;
+      invObj.userStatus = userStatus;
+      invObj.isBlocked = userStatus === "INACTIVE_BY_ADMIN";
+      invObj.status = isActive ? "ACTIVE" : "INACTIVE";
 
       // Attach all wallet and balance params directly on invObj
       invObj.referralBalance = referralBalance;
