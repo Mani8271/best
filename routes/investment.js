@@ -2869,6 +2869,13 @@ router.get("/admin/all-investments", auth, isAdmin, async (req, res) => {
         Number(walletTotalBalance)
       ).toFixed(2);
 
+      // Spot (referral) + Available + Commission. referralBalance above is an alias of commissionBalance, so it is not added again.
+      const totalEarningsBalance = (
+        Number(walletObj ? walletSpotBalance : spotBalance) +
+        Number(walletBalance) +
+        Number(commissionBalance)
+      ).toFixed(2);
+
       // Attach all wallet and balance params directly on invObj
       invObj.referralBalance = referralBalance;
       invObj.commissionBalance = commissionBalance;
@@ -2881,6 +2888,7 @@ router.get("/admin/all-investments", auth, isAdmin, async (req, res) => {
       invObj.walletIsUnlocked = walletIsUnlocked;
       invObj.totalAvailableBalance = totalAvailableBalance;
       invObj.totalAllBalances = totalAllBalances;
+      invObj.totalEarningsBalance = totalEarningsBalance;
 
       const formattedWallet = walletObj || {
         id: null,
@@ -2908,6 +2916,7 @@ router.get("/admin/all-investments", auth, isAdmin, async (req, res) => {
         invObj.User.commissionBalance = commissionBalance;
         invObj.User.roiBalance = roiBalance;
         invObj.User.spotBalance = spotBalance;
+        invObj.User.totalEarningsBalance = totalEarningsBalance;
         invObj.User.walletSpotBalance = walletSpotBalance;
         invObj.User.walletLockedBalance = walletLockedBalance;
         invObj.User.walletTotalBalance = walletTotalBalance;
