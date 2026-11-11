@@ -49,11 +49,36 @@ async function processPayoutTransfers(batchSize = 500) {
 
     console.log(`[PayoutTransferEngine] Processing batch of ${batch.length} transfer records (Last ID: ${lastProcessedId})...`);
 
-    for (const investment of batch) {
-      lastProcessedId = investment.id;
+    for (const batchItem of batch) {
+      lastProcessedId = batchItem.id;
 
       const t = await sequelize.transaction();
       try {
+        // Row-level lock & fresh fetch: every server process runs this cron at 00:00, so a concurrent run
+        // must wait here and then see the balances the first run already reset (otherwise it credits again).
+        const investment = await Investment.findByPk(batchItem.id, {
+          transaction: t,
+          lock: t.LOCK.UPDATE,
+        });
+
+        if (!investment || investment.status !== "ACTIVE") {
+          await t.rollback();
+          skippedCount++;
+          continue;
+        }
+
+        // Strict once-per-day check on the locked record
+        const alreadyTransferred = await InvestmentTransaction.findOne({
+          where: { userId: investment.userId, type: "PAYOUT_TRANSFER", "meta.date": todayStr },
+          attributes: ["id"],
+          transaction: t,
+        });
+        if (alreadyTransferred) {
+          await t.rollback();
+          skippedCount++;
+          continue;
+        }
+
         const roi = round2(investment.roiBalance || 0);
         const comm = round2(investment.commissionBalance || 0);
         const transferTotal = round2(roi + comm);
@@ -131,8 +156,8 @@ async function processPayoutTransfers(batchSize = 500) {
         totalTransferredAmount = round2(totalTransferredAmount + transferTotal);
       } catch (err) {
         await t.rollback();
-        console.error(`[PayoutTransferEngine] Error processing transfer for user ID ${investment.userId}:`, err);
-        errors.push({ userId: investment.userId, error: err.message });
+        console.error(`[PayoutTransferEngine] Error processing transfer for user ID ${batchItem.userId}:`, err);
+        errors.push({ userId: batchItem.userId, error: err.message });
       }
     }
 
