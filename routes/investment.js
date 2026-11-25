@@ -1,6 +1,6 @@
 const express = require("express");
 const { sequelize } = require("../config/db.js");
-const { Op } = require("sequelize");
+const { Op, QueryTypes } = require("sequelize");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const auth = require("../middleware/auth.js");
@@ -1692,6 +1692,307 @@ router.get("/admin/withdrawal-history/:userID", auth, isAdmin, async (req, res) 
   } catch (err) {
     console.error("Admin Get Withdrawal History Error:", err);
     return res.status(500).json({ success: false, msg: "Failed to fetch withdrawal history", error: err.message });
+  }
+});
+
+/* ======================================================================================
+   📋 ADMIN PAYOUT REPORTS: what every investor earned / is owed, whether they requested a withdrawal or not
+====================================================================================== */
+
+// Payout/earning date of an InvestmentTransaction: meta.date, else createdAt in IST
+const TXN_DATE_SQL = "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(meta, '$.date')), DATE(DATE_ADD(createdAt, INTERVAL 330 MINUTE)))";
+const IST_CREATED_DATE_SQL = (alias) => `DATE(DATE_ADD(${alias}.createdAt, INTERVAL 330 MINUTE))`;
+const IS_SPOT_SQL = "(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(meta, '$.isSpotCommission')), '') = 'true' OR description LIKE 'Direct Spot Referral Commission%')";
+const isDateStr = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
+const addDaysStr = (s, n) => {
+  const d = new Date(`${s}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+const byUserId = (rows) => new Map(rows.map((r) => [Number(r.userId), r]));
+const num = (v) => round2(Number(v || 0));
+
+/** Payout cycle that ends on the latest payout day (PAYOUT_TRANSFER_DAY_1/2) on or before refDate: [fromDate, toDate] */
+async function getPayoutCycle(refDate) {
+  const days = [
+    await getSettingNumber("PAYOUT_TRANSFER_DAY_1", 10),
+    await getSettingNumber("PAYOUT_TRANSFER_DAY_2", 25),
+  ].sort((a, b) => a - b);
+  const pad = (n) => String(n).padStart(2, "0");
+  const prevMonth = (y, m) => (m === 1 ? [y - 1, 12] : [y, m - 1]);
+
+  const [y, m, d] = refDate.split("-").map(Number);
+  const endDays = days.filter((day) => day <= d);
+  const end = endDays.length ? [y, m, Math.max(...endDays)] : [...prevMonth(y, m), Math.max(...days)];
+  const startDays = days.filter((day) => day < end[2]);
+  const startAfter = startDays.length ? [end[0], end[1], Math.max(...startDays)] : [...prevMonth(end[0], end[1]), Math.max(...days)];
+
+  return {
+    fromDate: addDaysStr(`${startAfter[0]}-${pad(startAfter[1])}-${pad(startAfter[2])}`, 1),
+    toDate: `${end[0]}-${pad(end[1])}-${pad(end[2])}`,
+  };
+}
+
+/** Every investment holder with current balances & saved bank details */
+async function getInvestorBase() {
+  return sequelize.query(
+    `SELECT i.userId, u.userID, u.name, u.phone, u.status AS userStatus,
+            i.totalInvested, i.activeInvestment, i.roiBalance, i.commissionBalance,
+            wa.balance AS availableBalance, wa.spotBalance AS referralBalance,
+            b.accountHolderName, b.accountNumber, b.ifscCode, b.bankName
+     FROM Investments i
+     JOIN Users u ON u.id = i.userId
+     LEFT JOIN Wallets wa ON wa.userId = i.userId
+     LEFT JOIN InvestmentBankDetails b ON b.userId = i.userId`,
+    { type: QueryTypes.SELECT }
+  );
+}
+
+/** Pending withdrawal requests right now (investment + wallet/spot), per user */
+async function getPendingWithdrawals() {
+  const inv = await sequelize.query(
+    `SELECT userId, SUM(amount) AS amount, COUNT(*) AS cnt FROM InvestmentWithdrawals WHERE status = 'PENDING' GROUP BY userId`,
+    { type: QueryTypes.SELECT }
+  );
+  const wal = await sequelize.query(
+    `SELECT wa.userId, SUM(t.amount) AS amount, COUNT(*) AS cnt
+     FROM WalletTransactions t JOIN Wallets wa ON wa.id = t.walletId
+     WHERE t.reason = 'WITHDRAWAL_REQUEST' AND t.status = 'PENDING'
+     GROUP BY wa.userId`,
+    { type: QueryTypes.SELECT }
+  );
+  const out = new Map();
+  for (const r of [...inv, ...wal]) {
+    const cur = out.get(Number(r.userId)) || { amount: 0, count: 0 };
+    out.set(Number(r.userId), { amount: num(cur.amount + Number(r.amount || 0)), count: cur.count + Number(r.cnt || 0) });
+  }
+  return out;
+}
+
+const bankOf = (r) =>
+  r.accountNumber
+    ? { accountHolderName: r.accountHolderName, accountNumber: r.accountNumber, ifscCode: r.ifscCode, bankName: r.bankName }
+    : null;
+
+/**
+ * ROI + level commission earned by every investor in one payout cycle (default: the latest cycle, e.g. 11–25 Nov),
+ * plus what the payout engine transferred on the payout day, current balances, pending requests and bank details.
+ * Query: date=YYYY-MM-DD (cycle that ends on the payout day on/before it) or from=YYYY-MM-DD&to=YYYY-MM-DD,
+ *        onlyEarning=true to hide users with nothing earned in the period.
+ */
+async function getPayoutCycleReport(query = {}) {
+  let fromDate;
+  let toDate;
+  if (isDateStr(query.from) && isDateStr(query.to)) {
+    fromDate = String(query.from).trim();
+    toDate = String(query.to).trim();
+  } else {
+    ({ fromDate, toDate } = await getPayoutCycle(isDateStr(query.date) ? String(query.date).trim() : istDate(new Date())));
+  }
+
+  const [base, earnings, transfers, pending] = await Promise.all([
+    getInvestorBase(),
+    sequelize.query(
+      `SELECT userId,
+              SUM(CASE WHEN type = 'DAILY_ROI' THEN amount ELSE 0 END) AS roi,
+              SUM(CASE WHEN type = 'DAILY_LEVEL_COMMISSION' THEN amount ELSE 0 END) AS commission
+       FROM InvestmentTransactions
+       WHERE type IN ('DAILY_ROI', 'DAILY_LEVEL_COMMISSION') AND ${TXN_DATE_SQL} BETWEEN :fromDate AND :toDate
+       GROUP BY userId`,
+      { replacements: { fromDate, toDate }, type: QueryTypes.SELECT }
+    ),
+    // MIN: a payout counts once even if old duplicate rows exist for that day
+    sequelize.query(
+      `SELECT userId, MIN(amount) AS amount
+       FROM InvestmentTransactions
+       WHERE type = 'PAYOUT_TRANSFER' AND JSON_UNQUOTE(JSON_EXTRACT(meta, '$.date')) = :toDate
+       GROUP BY userId`,
+      { replacements: { toDate }, type: QueryTypes.SELECT }
+    ),
+    getPendingWithdrawals(),
+  ]);
+
+  const earnMap = byUserId(earnings);
+  const transferMap = byUserId(transfers);
+
+  let users = base.map((r) => {
+    const uId = Number(r.userId);
+    const e = earnMap.get(uId);
+    const roi = num(e?.roi);
+    const commission = num(e?.commission);
+    const p = pending.get(uId);
+    return {
+      userId: uId,
+      userID: r.userID,
+      name: r.name,
+      phone: r.phone,
+      userStatus: r.userStatus,
+      activeInvestment: num(r.activeInvestment),
+      roi,
+      commission,
+      totalEarned: num(roi + commission),
+      transferredOnPayoutDay: transferMap.has(uId) ? num(transferMap.get(uId).amount) : 0,
+      availableBalance: num(r.availableBalance),
+      referralBalance: num(r.referralBalance),
+      pendingWithdrawal: p ? p.amount : 0,
+      hasPendingRequest: !!p,
+      bank: bankOf(r),
+    };
+  });
+
+  if (String(query.onlyEarning) === "true") users = users.filter((u) => u.totalEarned > 0);
+  users.sort((a, b) => b.totalEarned - a.totalEarned || String(a.name || "").localeCompare(String(b.name || "")));
+
+  const sum = (k) => num(users.reduce((s, u) => s + u[k], 0));
+  return {
+    fromDate,
+    toDate,
+    totals: {
+      users: users.length,
+      earningUsers: users.filter((u) => u.totalEarned > 0).length,
+      usersWithPendingRequest: users.filter((u) => u.hasPendingRequest).length,
+      roi: sum("roi"),
+      commission: sum("commission"),
+      totalEarned: sum("totalEarned"),
+      transferredOnPayoutDay: sum("transferredOnPayoutDay"),
+      availableBalance: sum("availableBalance"),
+      referralBalance: sum("referralBalance"),
+      pendingWithdrawal: sum("pendingWithdrawal"),
+    },
+    users,
+  };
+}
+
+/**
+ * All-time totals for every investor: earned (ROI, level commission, referral), withdrawn/paid, pending requests
+ * and what is still held in their balances. Earnings come from the daily credits, so duplicate payout
+ * transfers do not inflate them.
+ */
+async function getOverallPayoutReport() {
+  const [base, earnings, invW, walW, pending] = await Promise.all([
+    getInvestorBase(),
+    sequelize.query(
+      `SELECT userId,
+              SUM(CASE WHEN type = 'DAILY_ROI' THEN amount ELSE 0 END) AS roi,
+              SUM(CASE WHEN type = 'DAILY_LEVEL_COMMISSION' OR (type = 'LEVEL_COMMISSION' AND NOT ${IS_SPOT_SQL}) THEN amount ELSE 0 END) AS commission,
+              SUM(CASE WHEN ${IS_SPOT_SQL} THEN amount ELSE 0 END) AS referral
+       FROM InvestmentTransactions
+       WHERE type IN ('DAILY_ROI', 'DAILY_LEVEL_COMMISSION', 'LEVEL_COMMISSION') OR description LIKE 'Direct Spot Referral Commission%'
+       GROUP BY userId`,
+      { type: QueryTypes.SELECT }
+    ),
+    sequelize.query(
+      `SELECT userId, SUM(amount) AS approved, MAX(processedAt) AS lastPaidAt
+       FROM InvestmentWithdrawals WHERE status = 'APPROVED' GROUP BY userId`,
+      { type: QueryTypes.SELECT }
+    ),
+    sequelize.query(
+      `SELECT wa.userId, SUM(t.amount) AS approved,
+              SUM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.meta, '$.netAmount')), t.amount)) AS approvedNet,
+              MAX(t.processedAt) AS lastPaidAt
+       FROM WalletTransactions t JOIN Wallets wa ON wa.id = t.walletId
+       WHERE t.reason = 'WITHDRAWAL_REQUEST' AND t.status = 'APPROVED'
+       GROUP BY wa.userId`,
+      { type: QueryTypes.SELECT }
+    ),
+    getPendingWithdrawals(),
+  ]);
+
+  const earnMap = byUserId(earnings);
+  const invMap = byUserId(invW);
+  const walMap = byUserId(walW);
+
+  const users = base.map((r) => {
+    const uId = Number(r.userId);
+    const e = earnMap.get(uId);
+    const iw = invMap.get(uId);
+    const ww = walMap.get(uId);
+    const p = pending.get(uId);
+
+    const roi = num(e?.roi);
+    const commission = num(e?.commission);
+    const referral = num(e?.referral);
+    const availableBalance = num(r.availableBalance);
+    const roiBalance = num(r.roiBalance);
+    const commissionBalance = num(r.commissionBalance);
+    const referralBalance = num(r.referralBalance);
+    const lastPaid = [iw?.lastPaidAt, ww?.lastPaidAt].filter(Boolean).map((d) => new Date(d)).sort((a, b) => b - a)[0] || null;
+
+    return {
+      userId: uId,
+      userID: r.userID,
+      name: r.name,
+      phone: r.phone,
+      userStatus: r.userStatus,
+      totalInvested: num(r.totalInvested),
+      activeInvestment: num(r.activeInvestment),
+      totalRoi: roi,
+      totalCommission: commission,
+      totalReferral: referral,
+      totalEarned: num(roi + commission + referral),
+      totalWithdrawn: num(Number(iw?.approved || 0) + Number(ww?.approved || 0)),
+      totalPaidToBank: num(Number(iw?.approved || 0) + Number(ww?.approvedNet || 0)),
+      lastPaidAt: lastPaid,
+      pendingWithdrawal: p ? p.amount : 0,
+      availableBalance,
+      roiBalance,
+      commissionBalance,
+      referralBalance,
+      currentBalance: num(availableBalance + roiBalance + commissionBalance + referralBalance),
+      bank: bankOf(r),
+    };
+  });
+
+  users.sort((a, b) => b.totalEarned - a.totalEarned || String(a.name || "").localeCompare(String(b.name || "")));
+
+  const sum = (k) => num(users.reduce((s, u) => s + u[k], 0));
+  return {
+    totals: {
+      users: users.length,
+      totalInvested: sum("totalInvested"),
+      activeInvestment: sum("activeInvestment"),
+      totalRoi: sum("totalRoi"),
+      totalCommission: sum("totalCommission"),
+      totalReferral: sum("totalReferral"),
+      totalEarned: sum("totalEarned"),
+      totalWithdrawn: sum("totalWithdrawn"),
+      totalPaidToBank: sum("totalPaidToBank"),
+      pendingWithdrawal: sum("pendingWithdrawal"),
+      currentBalance: sum("currentBalance"),
+    },
+    users,
+  };
+}
+
+/**
+ * @route   GET /api/investment/admin/payout-report/cycle
+ * @desc    Admin: per-investor ROI + commission earned in a payout cycle (default latest, e.g. 11–25 Nov),
+ *          payout transferred, balances, pending requests & bank details — every investor, requested or not.
+ * @access  Admin / Master / Staff
+ * Query:   date=YYYY-MM-DD | from=YYYY-MM-DD&to=YYYY-MM-DD, onlyEarning=true
+ */
+router.get("/admin/payout-report/cycle", auth, isAdmin, async (req, res) => {
+  try {
+    const result = await getPayoutCycleReport(req.query);
+    return res.status(200).json({ success: true, ...result });
+  } catch (err) {
+    console.error("Admin Payout Cycle Report Error:", err);
+    return res.status(500).json({ success: false, msg: "Failed to fetch payout cycle report", error: err.message });
+  }
+});
+
+/**
+ * @route   GET /api/investment/admin/payout-report/overall
+ * @desc    Admin: all-time earned / withdrawn / pending / current balance for every investor, with grand totals.
+ * @access  Admin / Master / Staff
+ */
+router.get("/admin/payout-report/overall", auth, isAdmin, async (req, res) => {
+  try {
+    const result = await getOverallPayoutReport();
+    return res.status(200).json({ success: true, ...result });
+  } catch (err) {
+    console.error("Admin Overall Payout Report Error:", err);
+    return res.status(500).json({ success: false, msg: "Failed to fetch overall payout report", error: err.message });
   }
 });
 
